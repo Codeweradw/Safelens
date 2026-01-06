@@ -1,0 +1,233 @@
+:root {
+    --bg: #f5f8fb;
+    --card: #ffffff;
+    --accent: #0e4380;
+    --shadow: 0 6px 14px rgba(13, 30, 60, 0.08);
+}
+
+body {
+    margin: 0;
+    font-family: 'Poppins', sans-serif;
+    background: var(--bg);
+}
+
+/* LEADER'S HEADER & FOOTER STYLES */
+.topbar { display: flex; justify-content: space-between; align-items: center; padding: 18px 36px; background: #fff; box-shadow: 0 2px 10px rgba(0,0,0,0.05); }
+.nav .nav-btn {
+      margin-left: 8px;
+      padding: 12px 35px;
+      border-radius: 6px;
+      border: none;
+      background: #fff;
+      box-shadow: var(--shadow);
+      cursor: pointer;
+      transition: all 0.2s;
+      font-size: 16px;
+      font-weight: 500;
+    }
+
+
+       .nav .nav-btn.active {
+           background: linear-gradient(to bottom, #145da0, #07223a);
+           color: #fff;
+           box-shadow: 0 6px 14px rgba(8, 52, 91, 0.35);
+       }
+
+
+       .nav .nav-btn:hover {
+           transform: translateY(-1px);
+           box-shadow: 0 8px 18px rgba(13, 56, 95, 0.25);
+       }
+.footer { display: flex; justify-content: space-between; padding: 20px 40px; background: linear-gradient(to bottom, #145da0, #07223a); color: white; margin-top: 50px; }
+
+/* SAFETY TIPS GRID STYLES */
+.tips-container { padding: 40px; max-width: 1200px; margin: auto; }
+.hero-card { background: white; padding: 30px; border-radius: 15px; box-shadow: var(--shadow); margin-bottom: 40px; }
+.safety-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 20px; }
+.category-card { 
+    background: linear-gradient(180deg, #145da0 0%, #07223a 100%);
+    border-radius: 15px; padding: 20px; text-align: center; color: white;
+    display: flex; flex-direction: column; align-items: center; justify-content: space-between;
+}
+.category-card img { width: 100%; max-width: 150px; margin: 20px 0; }
+.view-btn { background: white; color: #07223a; padding: 10px 20px; text-decoration: none; border-radius: 8px; font-weight: bold; }
+
+/* PROFILE DROPDOWN (From Leader's Code) */
+.profile-card {
+           display: none;
+           position: absolute;
+           right: 0;
+           top: 50px;
+           width: 290px;
+           /* 🔼 wider */
+           padding: 14px;
+           /* 🔼 more breathing room */
+           background-color: #fff;
+           box-shadow: 0 10px 22px rgba(13, 30, 60, 0.25);
+           border-radius: 12px;
+           z-index: 1000;
+           font-family: 'Poppins', Arial, sans-serif;
+       }
+
+
+
+
+       .profile-card.show {
+           display: block;
+       }
+
+
+       .profile-card .profile-info {
+           display: flex;
+           align-items: center;
+           gap: 10px;
+           margin-bottom: 10px;
+       }
+
+
+       .profile-card .profile-pic {
+           width: 40px;
+           height: 40px;
+           border-radius: 50%;
+           object-fit: cover;
+       }
+
+
+       .profile-card .profile-name {
+           font-weight: 600;
+           font-size: 14px;
+       }
+
+
+       .profile-card .section-title {
+           font-size: 12px;
+           font-weight: 600;
+           color: #555;
+           margin-top: 10px;
+           margin-bottom: 4px;
+           padding-left: 5px;
+           text-transform: uppercase;
+       }
+
+
+       .profile-card a {
+           display: block;
+           padding: 6px 10px 6px 20px;
+           /* indent links under section */
+           text-decoration: none;
+           color: #222;
+           border-radius: 6px;
+           transition: background 0.2s;
+           font-size: 13px;
+       }
+
+
+       .profile-card .profile-muni {
+           font-size: 13px;
+           /* readable size */
+           color: black;
+           /* gray text */
+           display: block;
+           /* important para lumabas sa next line */
+           margin-top: 2px;
+           /* konting spacing mula sa name */
+       }
+
+
+
+
+       .profile-card a:hover {
+           background-color: #f1f1f1;
+       }
+
+
+       /* Profile button hover effect only */
+       #profileBtn:hover {
+           transform: scale(1.05);
+           box-shadow: 0 8px 18px rgba(13, 56, 95, 0.25);
+       }
+
+
+       /* Smooth animation */
+       #profileBtn {
+           transition: all 0.2s ease;
+       }
+
+/* Sub-page Layout */
+.sub-container {
+    display: flex;
+    padding: 40px;
+    gap: 30px;
+    max-width: 1300px;
+    margin: auto;
+    align-items: flex-start;
+}
+
+/* Sidebar Card */
+.sidebar-card {
+    flex: 0 0 300px;
+    background: linear-gradient(180deg, #145da0 0%, #07223a 100%);
+    border-radius: 15px;
+    padding: 30px;
+    text-align: center;
+    color: white;
+    box-shadow: var(--shadow);
+}
+
+.sidebar-card img {
+    width: 100%;
+    margin-top: 20px;
+}
+
+/* Tips List (Right Side) */
+.tips-list {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    gap: 20px;
+}
+
+.tip-item {
+    background: white;
+    border-radius: 15px;
+    padding: 20px;
+    display: flex;
+    align-items: center;
+    gap: 20px;
+    box-shadow: var(--shadow);
+    transition: transform 0.2s;
+}
+
+.tip-item:hover {
+    transform: translateY(-3px);
+}
+
+.tip-icon {
+    width: 80px;
+    height: 80px;
+    object-fit: contain;
+}
+
+.tip-text h4 {
+    margin: 0 0 8px 0;
+    color: #333;
+    font-size: 1.1rem;
+}
+
+.tip-text p {
+    margin: 0;
+    color: #666;
+    font-size: 0.9rem;
+    line-height: 1.4;
+}
+.brand .offLogo {
+           height: 70px;
+           width: 100px;
+           margin-top: -10px;
+       }
+.profile-pic {
+           height: 50px;
+           width: 50px;
+           border-radius: 50%;
+           object-fit: cover;
+       }
