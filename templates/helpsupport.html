@@ -1,0 +1,181 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>SafeLens Help & Support</title>
+    <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@300;400;600&display=swap" rel="stylesheet">
+    <style>
+        :root {
+            --bg-color: #f8faff;
+            --text-main: #333333;
+            --accent-blue: #4a77a5;
+            --card-bg: #ffffff;
+            --shadow: 0 4px 15px rgba(0,0,0,0.05);
+        }
+
+        body {
+            font-family: 'Poppins', sans-serif;
+            background-color: var(--bg-color);
+            margin: 0;
+            padding: 40px;
+            color: var(--text-main);
+        }
+
+        
+        .back-nav {
+            display: flex;
+            align-items: center;
+            font-weight: 600;
+            font-size: 18px;
+            margin-bottom: 40px;
+            cursor: pointer;
+        }
+
+        .back-nav span {
+            margin-right: 10px;
+            font-size: 22px;
+        }
+
+       
+        h1 {
+            text-align: center;
+            font-size: 36px;
+            font-weight: 400;
+            margin-bottom: 40px;
+        }
+
+        
+        .search-container {
+            max-width: 600px;
+            margin: 0 auto;
+            text-align: center;
+        }
+
+        .search-bar {
+            width: 100%;
+            padding: 15px 25px;
+            border-radius: 50px;
+            border: 1px solid #e0e0e0;
+            background: #fff;
+            font-size: 16px;
+            box-shadow: var(--shadow);
+            outline: none;
+            color: #666;
+        }
+
+        .top-searches {
+            margin-top: 25px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 12px;
+            font-size: 14px;
+        }
+
+        .tag {
+            background-color: var(--accent-blue);
+            color: white;
+            padding: 8px 20px;
+            border-radius: 20px;
+            cursor: pointer;
+            transition: opacity 0.2s;
+        }
+
+        .tag:hover {
+            opacity: 0.9;
+        }
+
+       
+        .cards-grid {
+            display: flex;
+            justify-content: center;
+            gap: 25px;
+            margin-top: 80px;
+            flex-wrap: wrap;
+        }
+
+        .card {
+            background: var(--card-bg);
+            border-radius: 20px;
+            padding: 30px 20px;
+            width: 250px;
+            text-align: center;
+            box-shadow: var(--shadow);
+            transition: transform 0.2s;
+        }
+
+        .card:hover {
+            transform: translateY(-5px);
+        }
+
+        .card-icon {
+            font-size: 50px;
+            margin-bottom: 15px;
+            display: block;
+        }
+
+        .card h3 {
+            font-size: 14px;
+            font-weight: 700;
+            margin-bottom: 10px;
+            letter-spacing: 0.5px;
+            text-transform: uppercase;
+        }
+
+        .card p {
+            font-size: 12px;
+            line-height: 1.5;
+            color: #666;
+            margin: 0;
+        }
+    </style>
+</head>
+<body>
+
+    <div class="back-nav">
+        <span>&lsaquo;</span> Help & Support
+    </div>
+
+    <h1>How can we help?</h1>
+
+    <div class="search-container">
+        <input type="text" class="search-bar" placeholder="Search how-tos and more">
+        
+        <div class="top-searches">
+            <span style="color: #444; font-weight: 600;">Top Searches</span>
+            <div class="tag">Alert</div>
+            <div class="tag">Report</div>
+            <div class="tag">Safety</div>
+            <div class="tag">Accident</div>
+        </div>
+    </div>
+
+  <div class="cards-grid">
+    <div class="card">
+        <div class="icon-container">
+            <img src="{{ url_for('static', filename='rocket.png') }}" alt="Getting Started">
+        </div>
+        <h3>Getting Started</h3>
+        <p>A quick guide to help you navigate and use SafeLens effectively.</p>
+    </div>
+
+    <div class="card">
+        <div class="icon-container">
+            <img src="{{ url_for('static', filename='profile.png') }}" alt="Profile & Preferences">
+        </div>
+        <h3>Profile & Preferences</h3>
+        <p>Manage your personal details and customize your SafeLens experience.</p>
+    </div>
+
+    <div class="card">
+        <div class="icon-container">
+            <img src="{{ url_for('static', filename='help.png') }}" alt="Get Help">
+        </div>
+        <h3>Get Help</h3>
+        <p>Access help resources and get support for any concerns.</p>
+    </div>
+</div>
+
+</body>
+</html>

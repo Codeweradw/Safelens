@@ -1,0 +1,32 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="sub-container">
+    <div class="sidebar-card">
+        <h2>Online Safety</h2>
+        <img src="{{ url_for('static', filename='images/onlineSafety.png') }}" alt="Online">
+    </div>
+    <div class="tips-list">
+        <div class="tip-item">
+            <img src="{{ url_for('static', filename='images/on1.png') }}" class="tip-icon">
+            <div class="tip-text">
+                <h4>Use Strong and Unique Passwords</h4>
+                <p>This protects your accounts from being easily hacked. It keeps your personal data safe and prevents unauthorized access.</p>
+            </div>
+        </div>
+        <div class="tip-item">
+            <img src="{{ url_for('static', filename='images/on2.png') }}" class="tip-icon">
+            <div class="tip-text">
+                <h4>Avoid Clicking Suspicious Links</h4>
+                <p>This helps you avoid scams, malware, and phishing attacks. It ensures you stay safe from websites designed to steal information.</p>
+            </div>
+        </div>
+        <div class="tip-item">
+            <img src="{{ url_for('static', filename='images/on3.png') }}" class="tip-icon">
+            <div class="tip-text">
+                <h4>Do Not Share Personal Information Publicly</h4>
+                <p>This prevents strangers from knowing sensitive details about you. It reduces the risk of identity theft and online harassment.</p>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}

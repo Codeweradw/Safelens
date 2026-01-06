@@ -1,0 +1,114 @@
+<!doctype html>
+<html lang="en">
+<head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>SafeLens - Safety Tips</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/style1.css') }}">
+    <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@300;400;600&display=swap" rel="stylesheet">
+</head>
+<body>
+    <header class="topbar">
+       <div class="brand">
+           <img src="{{ url_for('static', filename='offLogo.png') }}" alt="SafeLens" class="offLogo" />
+       </div>
+       <nav class="nav">
+           <button class="nav-btn {% if active_page == 'home' %}active{% endif %}"
+               onclick="location.href='/lensHome'">Home</button>
+           <button class="nav-btn {% if active_page == 'analytics' %}active{% endif %}"
+               onclick="location.href='/lensAnalytics'">Analytics</button>
+           <button class="nav-btn {% if active_page == 'map' %}active{% endif %}"
+               onclick="location.href='/userMap'">Map</button>
+           <button class="nav-btn {% if active_page == 'hotlines' %}active{% endif %}"
+               onclick="location.href='/hotlines'">Hotlines</button>
+           <button class="nav-btn {% if active_page == 'safetyTips' %}active{% endif %}"
+               onclick="location.href='/safetyTips'">Safety Tips</button>
+
+
+
+
+           <div class="profile-wrapper" style="position: relative; display: inline-block;">
+               <!-- Existing Profile Button -->
+               <button id="profileBtn"
+                   class="nav-btn {% if active_page == 'profile' %}active{% endif %}">Profile</button>
+
+
+               <!-- Profile Card Dropdown -->
+               <div id="profileCard" class="profile-card">
+                   <div class="profile-info">
+                       <img src="{{ url_for('static', filename='user-icon.jpg') }}" alt="User" class="profile-pic">
+                       <div>
+                           <p class="profile-name">{{ session.get('email', 'User').split('@')[0] }}</p>
+                           <span class="profile-muni" style="font-size:12px;color:#555;">{{ session.get('municipality')
+                               }}, Pangasinan</span>
+                       </div>
+                   </div>
+
+
+                   <hr>
+                   <!-- Account Section -->
+                   <p class="section-title">Account</p>
+                   <a href="#">Edit Profile</a>
+                   <a href="{{ url_for('security') }}">Security</a>
+
+
+                   <!-- Support & About Section -->
+                   <p class="section-title">Support & About</p>
+                   <a href="#">Help & Support</a>
+                   <a href="{{ url_for('termsPolicies') }}">Terms & Policies</a>
+
+
+                   <!-- Actions Section -->
+                   <p class="section-title">Actions</p>
+                   <a href="{{ url_for('reportProblem') }}">Report a Problem</a>
+                   <a href="#" id="logoutBtn" style="color:red;">Logout</a>
+
+
+               </div>
+
+
+       </nav>
+   </header>
+
+    <main>
+        {% block content %}{% endblock %}
+    </main>
+
+    <footer class="footer">
+        <div class="leftFooter">
+            © 2025 SafeLens, All Rights Reserved | Last Updated: November 18, 2025
+        </div>
+        <div class="rightFooter">
+            User Terms & Condition | Privacy Policy
+        </div>
+    </footer>
+
+    <script>
+        // Profile Dropdown Logic
+        document.getElementById("profileBtn").addEventListener("click", function (e) {
+            e.stopPropagation();
+            document.getElementById("profileCard").classList.toggle("show");
+        });
+        document.addEventListener("click", function () {
+            document.getElementById("profileCard").classList.remove("show");
+        });
+        // Add this script to base.html
+        
+        document.addEventListener('DOMContentLoaded', function() {
+        // Get current path
+        const currentPath = window.location.pathname;
+    
+         // Remove 'active' class from all nav buttons
+        document.querySelectorAll('.nav-btn').forEach(btn => {
+        btn.classList.remove('active');
+        });
+    
+        // Add 'active' class based on current path
+        if (currentPath === '/safetyTips') {
+        document.querySelector('button[onclick*="safetyTips"]').classList.add('active');
+    }
+    // Add other paths as needed...
+});
+</script>
+</body>
+</html>

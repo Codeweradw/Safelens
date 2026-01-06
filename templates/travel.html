@@ -1,0 +1,32 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="sub-container">
+    <div class="sidebar-card">
+        <h2>Travel Safety</h2>
+        <img src="{{ url_for('static', filename='images/travelSafety.png') }}" alt="Travel">
+    </div>
+    <div class="tips-list">
+        <div class="tip-item">
+            <img src="{{ url_for('static', filename='images/trav1.png') }}" class="tip-icon">
+            <div class="tip-text">
+                <h4>Keep Your Valuables Secure</h4>
+                <p>This prevents theft while you are on the move. Keeping items close and organized also reduces stress while traveling.</p>
+            </div>
+        </div>
+        <div class="tip-item">
+            <img src="{{ url_for('static', filename='images/trav2.png') }}" class="tip-icon">
+            <div class="tip-text">
+                <h4>Use Only Trusted Transportation Services</h4>
+                <p>This reduces the chances of getting scammed or ending up in unsafe vehicles. Choosing verified services gives you professional drivers.</p>
+            </div>
+        </div>
+        <div class="tip-item">
+            <img src="{{ url_for('static', filename='images/trav3.png') }}" class="tip-icon">
+            <div class="tip-text">
+                <h4>Inform Someone You Trust About Your Travel Plans</h4>
+                <p>This ensures someone knows where you are and can check on you. It adds an extra layer of protection throughout your trip.</p>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}

@@ -1,0 +1,32 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="tips-container">
+    <div class="hero-card">
+        <h2>Safety Tips</h2>
+        <p>Safety Tips in SafeLens offers quick, actionable guidance to help reduce risks in everyday situations.</p>
+    </div>
+
+    <div class="safety-grid">
+        <div class="category-card personal-bg">
+            <h3>Personal Safety</h3>
+            <img src="{{ url_for('static', filename='images/personalSafety.png') }}" alt="Personal">
+            <a href="/personal" class="view-btn">View Tips</a>
+        </div>
+        <div class="category-card home-bg">
+            <h3>Home Safety</h3>
+            <img src="{{ url_for('static', filename='images/homeSafety.png') }}" alt="Home">
+            <a href="/home" class="view-btn">View Tips</a>
+        </div>
+        <div class="category-card online-bg">
+            <h3>Online Safety</h3>
+            <img src="{{ url_for('static', filename='images/onlineSafety.png') }}" alt="Online">
+            <a href="/online" class="view-btn">View Tips</a>
+        </div>
+        <div class="category-card travel-bg">
+            <h3>Travel Safety</h3>
+            <img src="{{ url_for('static', filename='images/travelSafety.png') }}" alt="Travel">
+            <a href="/travel" class="view-btn">View Tips</a>
+        </div>
+    </div>
+</div>
+{% endblock %}

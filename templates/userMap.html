@@ -1,0 +1,1008 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+   <meta charset="UTF-8">
+   <meta name="viewport" content="width=device-width, initial-scale=1.0">
+   <title>SafeLens | Search Analytics</title>
+   
+   <!-- Leaflet CSS -->
+   <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+
+   <style>
+       :root {
+           --shadow: 0 6px 14px rgba(13, 30, 60, 0.08);
+           --accent: #145da0;
+       }
+
+       /* BODY FLEX FOR FOOTER */
+       body {
+           display: flex;
+           flex-direction: column;
+           min-height: 100vh;
+           margin: 0;
+           font-family: 'Poppins', Arial, sans-serif;
+       }
+
+       main {
+           flex: 1;
+       }
+
+       /* Topbar */
+       .topbar {
+           display: flex;
+           align-items: center;
+           justify-content: space-between;
+           padding: 29px 40px;
+           background: #ffffff;
+           box-shadow: 0 2px 10px rgba(0, 0, 0, 0.1);
+       }
+
+       .topbar-left {
+           flex: 1;
+       }
+
+       .nav {
+           display: flex;
+           align-items: center;
+       }
+
+       .nav-buttons {
+           margin-top: 0px;
+           display: flex;
+           align-items: center;
+           gap: 11px;
+           font-size: 16px;
+           font-weight: 500;
+       }
+
+       /* Navbar buttons */
+       .nav .nav-btn {
+      margin-left: 8px;
+      padding: 12px 35px;
+      border-radius: 6px;
+      border: none;
+      background: #fff;
+      box-shadow: var(--shadow);
+      cursor: pointer;
+      transition: all 0.2s;
+      font-size: 16px;
+      font-weight: 500;
+    }
+
+       .nav .nav-btn.active {
+           background: linear-gradient(to bottom, #145da0, #07223a);
+           color: #ffffff;
+           box-shadow: 0 6px 14px rgba(8, 52, 91, 0.35);
+       }
+
+       .nav .nav-btn:hover {
+           transform: translateY(-1px);
+           box-shadow: 0 8px 18px rgba(13, 56, 95, 0.25);
+       }
+
+       /* Search Bar */
+       #municipalitySearchForm {
+           display: flex;
+           gap: 6px;
+           max-width: 420px;
+       }
+
+       #municipalitySearch {
+           flex: 1;
+           padding: 10px 12px;
+           border-radius: 6px;
+           border: 1px solid #ccc;
+           font-size: 14px;
+       }
+
+       #municipalitySearchForm button {
+           padding: 10px 16px;
+           border-radius: 6px;
+           border: none;
+           background: #145da0;
+           color: #fff;
+           cursor: pointer;
+       }
+
+       /* Mini Card */
+       .card.mini {
+           border: solid rgb(190, 190, 190);
+           margin-top: 2px;
+           width: 400px;
+           background: #fff;
+           height: 600px;
+           border-radius: 14px;
+           box-shadow: var(--shadow);
+           overflow: hidden;
+           margin-left: -1px;
+       }
+
+       /* Card Image Header */
+       .card-image {
+           width: 100%;
+           height: 140px;
+       }
+
+       .card-image img {
+           width: 100%;
+           height: 100%;
+           object-fit: cover;
+       }
+
+       /* Card Content */
+       .card-content {
+           padding: 35px;
+       }
+
+       /* Header Row */
+       .card-header-row {
+           display: flex;
+           justify-content: space-between;
+           align-items: center;
+           gap: 10px;
+           margin-bottom: 12px;
+       }
+
+       .muni-left {
+           display: flex;
+           align-items: center;
+           gap: 10px;
+           flex-shrink: 0;
+       }
+
+       .muni-left h3 {
+           margin: 0;
+           font-size: 25px;
+           white-space: nowrap;
+           overflow: hidden;
+           text-overflow: ellipsis;
+       }
+
+       .light-indicator {
+           width: 20px;
+           height: 20px;
+           border-radius: 50%;
+           flex-shrink: 0;
+       }
+
+       .light-green {
+           background-color: #00b300;
+       }
+
+       .light-yellow {
+           background-color: #ffcc00;
+       }
+
+       .light-red {
+           background-color: #ff3300;
+       }
+
+       .light-gray {
+           background-color: #ccc;
+       }
+
+       /* Year dropdown */
+       #yearDropdown {
+           padding: 6px 12px;
+           border-radius: 6px;
+           border: 1px solid #ccc;
+           font-size: 16px;
+           cursor: pointer;
+       }
+
+       .divider {
+           border: none;
+           height: 1px;
+           background: #ddd;
+           margin: 16px 0;
+       }
+
+       .card-content strong {
+           font-size: 20px;
+           font-weight: 500;
+       }
+
+       .card-content p {
+           font-size: 21px;
+           margin: 0;
+       }
+
+       /* Profile Card Dropdown */
+       .profile-card {
+           display: none;
+           position: absolute;
+           right: 0;
+           top: 50px;
+           width: 290px;
+           padding: 14px;
+           background-color: #fff;
+           box-shadow: 0 10px 22px rgba(13, 30, 60, 0.25);
+           border-radius: 12px;
+           z-index: 1000;
+       }
+
+       .profile-card.show {
+           display: block;
+       }
+
+       .profile-card .profile-info {
+           display: flex;
+           align-items: center;
+           gap: 10px;
+           margin-bottom: 10px;
+       }
+
+       .profile-card .profile-pic {
+           width: 40px;
+           height: 40px;
+           border-radius: 50%;
+           object-fit: cover;
+       }
+
+       .profile-card .profile-name {
+           font-weight: 600;
+           font-size: 14px;
+       }
+
+       .profile-card .section-title {
+           font-size: 12px;
+           font-weight: 600;
+           color: #555;
+           margin-top: 10px;
+           margin-bottom: 4px;
+           padding-left: 5px;
+           text-transform: uppercase;
+       }
+
+       .profile-card a {
+           display: block;
+           padding: 6px 10px 6px 20px;
+           text-decoration: none;
+           color: #222;
+           border-radius: 6px;
+           transition: background 0.2s;
+           font-size: 13px;
+       }
+
+       .profile-card a:hover {
+           background-color: #f1f1f1;
+       }
+
+       #profileBtn:hover {
+           transform: scale(1.05);
+           box-shadow: 0 8px 18px rgba(13, 56, 95, 0.25);
+       }
+
+       #profileBtn {
+           transition: all 0.2s ease;
+       }
+
+       /* Footer */
+       footer {
+           background: linear-gradient(to bottom, #145da0, #07223a);
+           color: #fff;
+           padding: 18px 40px;
+           display: flex;
+           justify-content: space-between;
+           font-size: 14px;
+       }
+
+       footer .leftFooter {
+           text-align: left;
+       }
+
+       footer .rightFooter {
+           text-align: right;
+       }
+
+       /* NEW: Flex container for mini card + map */
+       .card-container {
+           display: flex;
+           gap: 35px;
+           margin-left: 35px;
+           margin-top: 35px;
+       }
+
+       /* Map Container */
+       .map-container {
+           flex: 1;
+           height: 600px;
+           border-radius: 14px;
+           margin-right: 35px;
+           position: relative;
+       }
+
+       #map {
+           height: 100%;
+           width: 100%;
+           border-radius: 14px;
+           border: 1px solid #ccc;
+       }
+
+       .profile-card .profile-info div {
+           display: flex;
+           flex-direction: column;
+           gap: 2px;
+       }
+
+       .profile-card .profile-name {
+           margin: 0;
+           font-weight: 600;
+           font-size: 14px;
+       }
+
+       .profile-card .profile-muni {
+           margin: 0;
+           font-size: 12px;
+           color: #555;
+       }
+
+       /* Suggestion dropdown */
+       #suggestions {
+           position: absolute;
+           background: #fff;
+           list-style: none;
+           margin: 0;
+           padding: 0;
+           border: 1px solid #ccc;
+           border-radius: 6px;
+           display: none;
+           z-index: 1000;
+           width: 100%;
+           max-width: 420px;
+       }
+
+       #suggestions li {
+           padding: 8px 12px;
+           cursor: pointer;
+           transition: background 0.2s;
+       }
+
+       #suggestions li:hover {
+           background-color: #f5f5f5;
+       }
+   </style>
+</head>
+
+<body>
+
+   <!-- HEADER & NAVBAR -->
+   <header class="topbar">
+       <div class="topbar-left">
+           <form id="municipalitySearchForm">
+               <input type="text" name="municipality" id="municipalitySearch" placeholder="Search Municipality...">
+               <button type="submit">Search</button>
+           </form>
+
+           <ul id="suggestions"></ul>
+       </div>
+
+       <nav class="nav">
+           <div class="nav-buttons">
+               <button class="nav-btn {% if active_page=='home' %}active{% endif %}"
+                   onclick="location.href='/lensHome'">Home</button>
+               <button class="nav-btn {% if active_page=='analytics' %}active{% endif %}"
+                   onclick="location.href='/lensAnalytics'">Analytics</button>
+               <button class="nav-btn {% if active_page=='userMap' %}active{% endif %}"
+                   onclick="location.href='/userMap'">Map</button>
+               <button class="nav-btn {% if active_page=='hotlines' %}active{% endif %}"
+                   onclick="location.href='/hotlines'">Hotlines</button>
+               <button class="nav-btn {% if active_page=='tips' %}active{% endif %}"
+                   onclick="location.href='/safetyTips'">Safety Tips</button>
+
+               <div class="profile-wrapper" style="position: relative; display: inline-block;">
+                   <button id="profileBtn"
+                       class="nav-btn {% if active_page == 'profile' %}active{% endif %}">Profile</button>
+                   <div id="profileCard" class="profile-card">
+                       <div class="profile-info">
+                           <img src="{{ url_for('static', filename='user-icon.jpg') }}" alt="User" class="profile-pic">
+                           <div>
+                               <p class="profile-name">{{ session.get('email', 'User').split('@')[0] }}</p>
+                               <span class="profile-muni">{{ session.get('municipality') }}, Pangasinan</span>
+                           </div>
+                       </div>
+                       <hr>
+                       <p class="section-title">Account</p>
+                       <a href="#">Edit Profile</a>
+                       <a href="{{ url_for('security') }}">Security</a>
+                       <p class="section-title">Support & About</p>
+                       <a href="#">Help & Support</a>
+                       <a href="#">Terms & Policies</a>
+                       <p class="section-title">Actions</p>
+                       <a href="{{ url_for('reportProblem') }}">Report a Problem</a>
+                       <a href="#" id="logoutBtn" style="color:red;">Logout</a>
+                   </div>
+               </div>
+           </div>
+       </nav>
+   </header>
+
+   <!-- MAIN CONTENT -->
+   <main>
+       <div class="card-container">
+           <!-- LEFT PANEL MINI CARD (Search Result) -->
+           <div class="card mini" id="userMuniCard">
+               <div class="card-image">
+                   <img src="{{ url_for('static', filename='cardMap.jpg') }}" alt="Map Preview">
+               </div>
+               <div class="card-content">
+                   <div class="card-header-row">
+                       <!-- Left side: Municipality + light -->
+                       <div class="muni-left">
+                           <h3 id="muniName">{{ municipality }}</h3>
+                           <div id="crimeHeatIndicator"
+                               class="light-indicator
+                            {% if total_cases <= 50 %}light-green{% elif total_cases <= 150 %}light-yellow{% elif total_cases > 150 %}light-red{% else %}light-gray{% endif %}">
+
+                           </div>
+                        <button class="nav-btn {% if active_page=='references' %}active{% endif %}"
+                         onclick="location.href='/references'">References</button>
+                       </div>
+
+                       <!-- Right side: Year dropdown -->
+                       <input type="hidden" id="yearMunicipality" value="{{ municipality }}">
+                       <select name="year" id="yearDropdown">
+                           {% for y in years %}
+                           <option value="{{ y }}" {% if y==year %}selected{% endif %}>{{ y }}</option>
+                           {% endfor %}
+                       </select>
+                   </div>
+
+                   <hr class="divider">
+
+                   <div>
+                       <strong>Total Cases:</strong>
+                       <p id="totalCases" style="color:#ff0000; font-size:20px">{{ total_cases }} Cases</p>
+                   </div>
+
+                   <hr class="divider">
+                   <div>
+                       <strong>Most Common Crime:</strong>
+                       <p id="mostCommonCrime" style="font-weight:600">{{ top_crime }}</p>
+                       <p id="mostCommonCrimeCases" style="color:#ff0000; font-size:20px;">{{ top_crime_cases }} Cases</p>
+                   </div>
+
+                   <hr class="divider">
+                   <div>
+                       <strong>Monthly Peak:</strong>
+                       <p id="peakMonth" style="font-weight:600">{{ peak_month }} </p>
+                       <p id="peakMonthCases" style="color:#ff0000; font-size:20px">{{ peak_month_cases }} Cases</p>
+                   </div>
+               </div>
+           </div>
+
+           <!-- RIGHT PANEL MAP -->
+           <div class="map-container">
+               <!-- HEATMAP TOGGLE BUTTON -->
+               <button id="toggleHeatmap"
+                   style="
+                       position:absolute;
+                       top:15px;
+                       right:15px;
+                       z-index:1000;
+                       padding:8px 14px;
+                       border:none;
+                       border-radius:6px;
+                       background:#145da0;
+                       color:white;
+                       font-weight:500;
+                       cursor:pointer;
+                       box-shadow:0 4px 12px rgba(0,0,0,0.2);
+                   ">
+                   Show Heatmap
+               </button>
+               <div id="map"></div>
+           </div>
+       </div>
+   </main>
+
+   <!-- FOOTER -->
+   <footer class="footer">
+       <div class="leftFooter">
+           © 2025 SafeLens, All Rights Reserved | Last Updated: November 18, 2025
+       </div>
+   </footer>
+
+   <!-- Leaflet JS -->
+   <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+   <!-- Leaflet Heatmap Plugin -->
+   <script src="https://unpkg.com/leaflet.heat/dist/leaflet-heat.js"></script>
+   <!-- SweetAlert2 -->
+   <script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script>
+
+   <script>
+       document.addEventListener("DOMContentLoaded", function () {
+           // ==================== GLOBAL STATE VARIABLES ====================
+           let heatLayer = null;
+           let isHeatmapVisible = false;
+           
+           // ==================== MAP INITIALIZATION ====================
+           const map = L.map('map').setView([16.0, 120.3], 9);
+           
+           L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+               attribution: '© OpenStreetMap contributors'
+           }).addTo(map);
+
+           let geojsonLayer = null;
+           let currentYear = document.getElementById('yearDropdown').value;
+           let currentMunicipality = null;
+           
+           // ==================== HEATMAP LOADER FUNCTION ====================
+           function loadHeatmap(year) {
+               fetch(`/heatmap-data?year=${year}`)
+                   .then(res => res.json())
+                   .then(data => {
+
+                       const municipalityCoords = {
+                           "Dagupan City": [16.0431, 120.3333],
+                           "San Carlos City": [15.9286, 120.3487],
+                           "Urdaneta City": [15.9761, 120.5710],
+                           "Alaminos City": [16.1565, 119.9816],
+                           "Lingayen": [16.0218, 120.2319],
+                           "Binmaley": [16.0305, 120.2690],
+                           "Calasiao": [16.0116, 120.3609],
+                           "Mangaldan": [16.0706, 120.4029],
+                           "Bayambang": [15.7906, 120.4547],
+                           "Malasiqui": [15.9205, 120.4171],
+                           "Sta. Barbara": [15.9984, 120.4022],
+                           "Infanta": [15.8265, 119.9073]
+                       };
+
+                       const heatPoints = [];
+
+                       data.forEach(item => {
+                           const coords = municipalityCoords[item.municipality];
+                           if (coords) {
+                               heatPoints.push([
+                                   coords[0],
+                                   coords[1],
+                                   Math.max(item.count / 10, 0.3)
+                               ]);
+                           }
+                       });
+
+                       if (heatLayer) map.removeLayer(heatLayer);
+
+                       heatLayer = L.heatLayer(heatPoints, {
+                           radius: 45,
+                           blur: 30,
+                           maxZoom: 10
+                       });
+                   });
+           }
+
+           // ==================== TOGGLE BUTTON LOGIC ====================
+           const toggleBtn = document.getElementById('toggleHeatmap');
+
+           toggleBtn.addEventListener('click', () => {
+               isHeatmapVisible = !isHeatmapVisible;
+
+               if (isHeatmapVisible) {
+                   // Show heatmap, hide polygons
+                   if (geojsonLayer) map.removeLayer(geojsonLayer);
+                   if (heatLayer) heatLayer.addTo(map);
+                   toggleBtn.textContent = "Show Municipality View";
+               } else {
+                   // Show polygons, hide heatmap
+                   if (heatLayer) map.removeLayer(heatLayer);
+                   if (geojsonLayer) geojsonLayer.addTo(map);
+                   toggleBtn.textContent = "Show Heatmap";
+               }
+           });
+
+           // ==================== GEOJSON LOADER FUNCTION ====================
+           function loadGeoJSONWithData(year) {
+               console.log(`Loading GeoJSON with crime data for year: ${year}`);
+               
+               fetch(`/api/map/geojson/${year}`)
+                   .then(res => {
+                       if (!res.ok) {
+                           throw new Error(`HTTP error! status: ${res.status}`);
+                       }
+                       return res.json();
+                   })
+                   .then(data => {
+                       console.log(`Loaded GeoJSON with ${data.features.length} municipalities for year ${year}`);
+                       
+                       // Remove existing layer
+                       if (geojsonLayer) {
+                           map.removeLayer(geojsonLayer);
+                       }
+                       
+                       // Create new GeoJSON layer
+                       geojsonLayer = L.geoJSON(data, {
+                           style: function(feature) {
+                               const isCurrent = currentMunicipality && 
+                                               feature.properties.MUNICIPALITY.toLowerCase() === 
+                                               currentMunicipality.toLowerCase();
+                               
+                               // Get the original color from the feature
+                               let fillColor = feature.properties.fill_color || '#3DC4FF';
+                               const crimeCount = feature.properties.crime_count || 0;
+                               
+                               // If no fill_color in feature, calculate based on crime count
+                               if (!feature.properties.fill_color) {
+                                   if (crimeCount === 0) {
+                                       fillColor = '#cccccc';
+                                   } else if (crimeCount <= 10) {
+                                       fillColor = '#90ee90';
+                                   } else if (crimeCount <= 30) {
+                                       fillColor = '#ffff00';
+                                   } else if (crimeCount > 30) {
+                                       fillColor = '#ff0000';
+                                   }
+                               }
+                               
+                               return {
+                                   fillColor: fillColor,
+                                   color: isCurrent ? '#E64A19' : '#1E88E5',
+                                   weight: isCurrent ? 3 : 1,
+                                   opacity: 0.8,
+                                   fillOpacity: 0.6
+                               };
+                           },
+                           onEachFeature: (feature, layer) => {
+                               const muniName = feature.properties.MUNICIPALITY;
+                               const crimeCount = feature.properties.crime_count || 0;
+                               
+                               layer.bindPopup(`
+                                   <div style="padding: 10px; min-width: 200px;">
+                                       <strong style="font-size: 16px;">${muniName}</strong><br>
+                                       <hr style="margin: 8px 0;">
+                                       <strong>Crime Cases:</strong> <span style="color: ${crimeCount > 30 ? '#ff0000' : crimeCount > 10 ? '#ff9900' : '#00aa00'}">${crimeCount}</span><br>
+                                       <small style="color: #666;"></small>
+                                   </div>
+                               `);
+                               
+                               // Click on municipality to search
+                               layer.on('click', function() {
+                                   // Switch to municipality view when clicking
+                                   isHeatmapVisible = false;
+                                   toggleBtn.textContent = "Show Heatmap";
+                                   
+                                   if (heatLayer) map.removeLayer(heatLayer);
+                                   if (geojsonLayer) map.addLayer(geojsonLayer);
+                                   
+                                   document.getElementById('municipalitySearch').value = muniName;
+                                   searchMunicipality(muniName);
+                               });
+                               
+                               // Hover effects
+                               layer.on('mouseover', function() {
+                                   this.setStyle({
+                                       weight: 2,
+                                       fillOpacity: 0.8
+                                   });
+                               });
+                               
+                               layer.on('mouseout', function() {
+                                   const isCurrent = currentMunicipality && 
+                                                   muniName.toLowerCase() === currentMunicipality.toLowerCase();
+                                   this.setStyle({
+                                       weight: isCurrent ? 3 : 1,
+                                       fillOpacity: 0.6
+                                   });
+                               });
+                           }
+                       });
+                       
+                       // Add to map if not in heatmap mode
+                       if (!isHeatmapVisible) {
+                           geojsonLayer.addTo(map);
+                       }
+                       
+                       // Highlight current municipality
+                       if (currentMunicipality) {
+                           highlightMunicipality(currentMunicipality);
+                       }
+                   })
+                   .catch(err => {
+                       console.error('Error loading GeoJSON:', err);
+                       
+                       // Fallback: load basic GeoJSON without crime data
+                       fetch('/api/map/geojson')
+                           .then(res => res.json())
+                           .then(data => {
+                               if (geojsonLayer) {
+                                   map.removeLayer(geojsonLayer);
+                               }
+                               
+                               geojsonLayer = L.geoJSON(data, {
+                                   style: {
+                                       color: '#1E88E5',
+                                       weight: 1,
+                                       fillColor: '#3DC4FF',
+                                       fillOpacity: 0.6
+                                   },
+                                   onEachFeature: (feature, layer) => {
+                                       const muniName = feature.properties.MUNICIPALITY;
+                                       layer.bindPopup(`<strong>${muniName}</strong>`);
+                                       
+                                       layer.on('click', function() {
+                                           // Switch to municipality view when clicking
+                                           isHeatmapVisible = false;
+                                           toggleBtn.textContent = "Show Heatmap";
+                                           
+                                           if (heatLayer) map.removeLayer(heatLayer);
+                                           if (geojsonLayer) map.addLayer(geojsonLayer);
+                                           
+                                           document.getElementById('municipalitySearch').value = muniName;
+                                           searchMunicipality(muniName);
+                                       });
+                                   }
+                               });
+                               
+                               // Add to map if not in heatmap mode
+                               if (!isHeatmapVisible) {
+                                   geojsonLayer.addTo(map);
+                               }
+                           })
+                           .catch(fallbackErr => {
+                               console.error('Fallback GeoJSON also failed:', fallbackErr);
+                           });
+                   });
+           }
+
+           // Function to highlight a municipality on the map
+           function highlightMunicipality(muniName) {
+               currentMunicipality = muniName;
+               
+               if (!geojsonLayer) return;
+               
+               geojsonLayer.eachLayer(function(layer) {
+                   const featureMuni = layer.feature.properties.MUNICIPALITY;
+                   
+                   if (featureMuni.toLowerCase() === muniName.toLowerCase()) {
+                       // Highlight selected municipality
+                       layer.setStyle({
+                           fillColor: '#FF5722',
+                           fillOpacity: 0.8,
+                           weight: 3,
+                           color: '#E64A19'
+                       });
+                       
+                       // Zoom to the municipality
+                       map.fitBounds(layer.getBounds().pad(0.2));
+                       
+                       // Open popup
+                       layer.openPopup();
+                   } else {
+                       // Reset other municipalities to their original colors
+                       const crimeCount = layer.feature.properties.crime_count || 0;
+                       let fillColor = '#3DC4FF';
+                       
+                       // Get the original color from the feature
+                       if (layer.feature.properties.fill_color) {
+                           fillColor = layer.feature.properties.fill_color;
+                       } else if (crimeCount === 0) {
+                           fillColor = '#cccccc';
+                       } else if (crimeCount <= 10) {
+                           fillColor = '#90ee90';
+                       } else if (crimeCount <= 30) {
+                           fillColor = '#ffff00';
+                       } else if (crimeCount > 30) {
+                           fillColor = '#ff0000';
+                       }
+                       
+                       layer.setStyle({
+                           fillColor: fillColor,
+                           fillOpacity: 0.6,
+                           weight: 1,
+                           color: '#1E88E5'
+                       });
+                   }
+               });
+           }
+
+           // ==================== SEARCH FUNCTIONALITY ====================
+           const searchInput = document.getElementById('municipalitySearch');
+           const searchForm = document.getElementById('municipalitySearchForm');
+           const yearDropdown = document.getElementById('yearDropdown');
+           const hiddenMuni = document.getElementById('yearMunicipality');
+           const suggestionsList = document.getElementById('suggestions');
+
+           function updateMiniCard(data) {
+               document.getElementById('muniName').textContent = data.municipality || '-';
+               document.getElementById('totalCases').textContent = (data.total_cases || 0) + ' Cases';
+               document.getElementById('mostCommonCrime').textContent = data.top_crime || '-';
+               document.getElementById('mostCommonCrimeCases').textContent = (data.top_crime_cases || 0) + ' Cases';
+               document.getElementById('peakMonth').textContent = data.peak_month || '-';
+               document.getElementById('peakMonthCases').textContent = (data.peak_month_cases || 0) + ' Cases';
+
+               hiddenMuni.value = data.municipality;
+
+               // Update crime heat indicator
+               const heat = document.getElementById('crimeHeatIndicator');
+               heat.className = 'light-indicator';
+               
+               const cases = data.total_cases || 0;
+               if (cases === 0) {
+                   heat.classList.add('light-gray');
+               } else if (cases <= 10) {
+                   heat.classList.add('light-green');
+               } else if (cases <= 30) {
+                   heat.classList.add('light-yellow');
+               } else {
+                   heat.classList.add('light-red');
+               }
+               
+               // Switch to municipality view and highlight on map
+               if (data.municipality) {
+                   isHeatmapVisible = false;
+                   toggleBtn.textContent = "Show Heatmap";
+                   
+                   if (heatLayer) map.removeLayer(heatLayer);
+                   if (geojsonLayer) map.addLayer(geojsonLayer);
+                   
+                   highlightMunicipality(data.municipality);
+               }
+           }
+
+           // Autocomplete
+           searchInput.addEventListener('input', async () => {
+               const q = searchInput.value.trim();
+               if (!q) {
+                   suggestionsList.style.display = 'none';
+                   return;
+               }
+
+               const res = await fetch(`/municipality_suggestions?term=${encodeURIComponent(q)}`);
+               const suggestions = await res.json();
+
+               suggestionsList.innerHTML = '';
+               suggestions.forEach(item => {
+                   const li = document.createElement('li');
+                   li.textContent = item;
+                   li.addEventListener('click', () => {
+                       searchInput.value = item;
+                       suggestionsList.style.display = 'none';
+                       searchMunicipality(item);
+                   });
+                   suggestionsList.appendChild(li);
+               });
+
+               suggestionsList.style.display = suggestions.length ? 'block' : 'none';
+           });
+
+           // Search municipality function
+           async function searchMunicipality(muni) {
+               const year = yearDropdown.value;
+               if (!muni) return;
+
+               suggestionsList.style.display = 'none';
+
+               try {
+                   const res = await fetch(`/searchMunicipality?name=${encodeURIComponent(muni)}&year=${year}`);
+                   const data = await res.json();
+
+                   if (data.error) {
+                       Swal.fire({
+                           icon: 'error',
+                           title: 'Not Found',
+                           text: data.error,
+                           confirmButtonColor: '#145da0'
+                       });
+                       return;
+                   }
+                   
+                   updateMiniCard(data);
+               } catch (error) {
+                   console.error('Search error:', error);
+                   // Try alternative API
+                   try {
+                       const res = await fetch(`/api/map/municipality/${encodeURIComponent(muni)}/${year}`);
+                       const data = await res.json();
+                       
+                       if (data.municipality) {
+                           updateMiniCard(data);
+                       } else {
+                           Swal.fire({
+                               icon: 'error',
+                               title: 'Error',
+                               text: 'Municipality not found',
+                               confirmButtonColor: '#145da0'
+                           });
+                       }
+                   } catch (apiError) {
+                       Swal.fire({
+                           icon: 'error',
+                           title: 'Error',
+                           text: 'Failed to search municipality',
+                           confirmButtonColor: '#145da0'
+                       });
+                   }
+               }
+           }
+
+           // Search form submission
+           searchForm.addEventListener('submit', async (e) => {
+               e.preventDefault();
+               const muni = searchInput.value.trim();
+               await searchMunicipality(muni);
+           });
+
+           // Year change handler
+           yearDropdown.addEventListener('change', async () => {
+               const year = yearDropdown.value;
+               const muni = hiddenMuni.value;
+               
+               // Reload map with new year's data
+               loadGeoJSONWithData(year);
+               loadHeatmap(year);
+               
+               // Update mini card if there's a selected municipality
+               if (muni && muni !== 'None') {
+                   await searchMunicipality(muni);
+               }
+           });
+
+           // Load default user municipality and initialize map
+           (async function initialize() {
+               const defaultMuni = hiddenMuni.value;
+               const defaultYear = yearDropdown.value || 2025;
+               
+               // Load initial GeoJSON with crime data
+               loadGeoJSONWithData(defaultYear);
+               
+               // Load heatmap data
+               loadHeatmap(defaultYear);
+               
+               // Set initial view to municipality polygons
+               isHeatmapVisible = false;
+               toggleBtn.textContent = "Show Heatmap";
+               
+               // Load default municipality data if available
+               if (defaultMuni && defaultMuni !== 'None') {
+                   await searchMunicipality(defaultMuni);
+               }
+           })();
+
+           // ==================== PROFILE CARD ====================
+           const profileBtn = document.getElementById('profileBtn');
+           const profileCard = document.getElementById('profileCard');
+
+           profileBtn.addEventListener('click', (e) => {
+               e.stopPropagation();
+               profileCard.classList.toggle('show');
+           });
+
+           document.addEventListener('click', (e) => {
+               if (!profileCard.contains(e.target) && !profileBtn.contains(e.target)) {
+                   profileCard.classList.remove('show');
+               }
+           });
+
+           // ==================== LOGOUT ====================
+           const logoutBtn = document.getElementById("logoutBtn");
+           if (logoutBtn) {
+               logoutBtn.addEventListener("click", function (e) {
+                   e.preventDefault();
+                   Swal.fire({
+                       title: "Are you sure?",
+                       text: "You will be logged out of your account.",
+                       icon: "warning",
+                       showCancelButton: true,
+                       confirmButtonText: "Yes, Logout",
+                       cancelButtonText: "Cancel",
+                       confirmButtonColor: "#d33",
+                       cancelButtonColor: "#6c757d",
+                       reverseButtons: true
+                   }).then((result) => {
+                       if (result.isConfirmed) {
+                           window.location.href = "{{ url_for('logout') }}";
+                       }
+                   });
+               });
+           }
+
+           // Hide suggestions when clicking outside
+           document.addEventListener('click', (e) => {
+               if (!suggestionsList.contains(e.target) && e.target !== searchInput) {
+                   suggestionsList.style.display = 'none';
+               }
+           });
+       });
+   </script>
+</body>
+</html>

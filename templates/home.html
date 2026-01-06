@@ -1,0 +1,32 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="sub-container">
+    <div class="sidebar-card">
+        <h2>Home Safety</h2>
+        <img src="{{ url_for('static', filename='images/homeSafety.png') }}" alt="Home">
+    </div>
+    <div class="tips-list">
+        <div class="tip-item">
+            <img src="{{ url_for('static', filename='images/home1.png') }}" class="tip-icon">
+            <div class="tip-text">
+                <h4>Keep Doors and Windows Locked</h4>
+                <p>This prevents intruders and keeps your home safe even when you are inside. It reduces the chances of someone entering without your knowledge.</p>
+            </div>
+        </div>
+        <div class="tip-item">
+            <img src="{{ url_for('static', filename='images/home2.png') }}" class="tip-icon">
+            <div class="tip-text">
+                <h4>Install Proper Lighting Outside</h4>
+                <p>Well-lit areas discourage suspicious people from coming near. It helps you see movements around the house more clearly.</p>
+            </div>
+        </div>
+        <div class="tip-item">
+            <img src="{{ url_for('static', filename='images/home3.png') }}" class="tip-icon">
+            <div class="tip-text">
+                <h4>Do Not Share Your Daily Routine Publicly</h4>
+                <p>Avoid posting your schedule on social media to reduce risks of targeted break-ins. Keeping details offline protects your security.</p>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}

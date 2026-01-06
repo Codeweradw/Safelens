@@ -1,0 +1,32 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="sub-container">
+    <div class="sidebar-card">
+        <h2>Personal Safety</h2>
+        <img src="{{ url_for('static', filename='images/personalSafety.png') }}" alt="Personal">
+    </div>
+    <div class="tips-list">
+        <div class="tip-item">
+            <img src="{{ url_for('static', filename='images/per1.png') }}" class="tip-icon">
+            <div class="tip-text">
+                <h4>Stay Aware of Your Surroundings</h4>
+                <p>Being alert is your first line of defense. Pay attention to people, vehicles, and activity around you—especially when walking alone.</p>
+            </div>
+        </div>
+        <div class="tip-item">
+            <img src="{{ url_for('static', filename='images/per2.png') }}" class="tip-icon">
+            <div class="tip-text">
+                <h4>Plan Your Routes and Travel Wisely</h4>
+                <p>Awareness helps you detect unusual behavior early and avoid potential risks before they escalate.</p>
+            </div>
+        </div>
+        <div class="tip-item">
+            <img src="{{ url_for('static', filename='images/per3.png') }}" class="tip-icon">
+            <div class="tip-text">
+                <h4>Stay Confident and Visible in Public</h4>
+                <p>Walk with purpose and stay in well-lit areas to discourage potential threats.</p>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
