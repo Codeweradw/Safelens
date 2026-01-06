@@ -1,0 +1,1891 @@
+from flask import Flask, render_template, jsonify, request, redirect, url_for, flash, session
+from werkzeug.security import generate_password_hash, check_password_hash
+from authlib.integrations.flask_client import OAuth
+from flask_mail import Mail, Message
+from itsdangerous import URLSafeTimedSerializer
+from werkzeug.security import generate_password_hash
+import config
+from config import GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET, GOOGLE_DISCOVERY_URL
+import psycopg2
+import calendar
+import re
+import json
+import os
+from functools import wraps
+from flask import make_response
+import secrets
+from datetime import datetime, timedelta
+
+EMAIL_REGEX = r'^[a-z0-9._%+-]+@[a-z0-9.-]+\.[a-z]{2,}$'  # strict pattern
+
+app = Flask(__name__)
+app.config.from_object('config')
+app.secret_key = "safelens_secret_key"
+
+mail = Mail(app)
+serializer = URLSafeTimedSerializer(app.config['SECRET_KEY'])
+
+oauth = OAuth(app)
+
+# para sa continue with google
+google = oauth.register(
+    name='google',
+    client_id=GOOGLE_CLIENT_ID,
+    client_secret=GOOGLE_CLIENT_SECRET,
+    server_metadata_url=GOOGLE_DISCOVERY_URL,
+    client_kwargs={
+        'scope': 'openid email profile'
+    }
+)
+
+# PostgreSQL connection parameters - UPDATED WITH CORRECT CREDENTIALS
+DB_HOST = "localhost"
+DB_NAME = "Safelens_db"
+DB_USER = "postgres"  # Changed from "jonathanbagusto" to "postgres"
+DB_PASSWORD = "2653"  # Added the password
+
+def get_db_connection():
+    conn = psycopg2.connect(
+        host=DB_HOST,
+        dbname=DB_NAME,
+        user=DB_USER,
+        password=DB_PASSWORD
+    )
+    return conn
+
+#----------------------------------------
+# Helper functions for /allCrimeTrend YUNG VIEW ALL
+#----------------------------------------
+
+def get_all_months_for_year(year):
+    """Return all months in proper order."""
+    return ["January", "February", "March", "April", "May", "June",
+            "July", "August", "September", "October", "November", "December"]
+
+def get_crime_cases_per_month(year):
+    """Return list of number of crime cases per month in order."""
+    conn = get_db_connection()
+    cur = conn.cursor()
+    cur.execute("""
+        SELECT "Month", COUNT(*) AS cases
+        FROM crime_reports
+        WHERE "Year" = %s
+        GROUP BY "Month"
+    """, (year,))
+    rows = cur.fetchall()
+    cur.close()
+    conn.close()
+
+    # Build dict month_name → cases
+    month_dict = {row[0].strip().title(): row[1] for row in rows}
+
+    # Fill missing months with 0 and preserve order
+    months_order = get_all_months_for_year(year)
+    cases = [month_dict.get(m, 0) for m in months_order]
+    return cases
+
+def generate_crime_trend_analysis(year):
+    """Optional: simple textual analysis."""
+    cases = get_crime_cases_per_month(year)
+    months = get_all_months_for_year(year)
+    if max(cases) == 0:
+        return f"No crime data available for {year}."
+    peak_index = cases.index(max(cases))
+    return f"Highest crime recorded in {months[peak_index]} with {cases[peak_index]} cases."
+
+# NEW: GeoJSON loading function
+def load_geojson_data():
+    """Load the Pangasinan municipalities GeoJSON data"""
+    try:
+        # First try the static/data folder
+        geojson_path = os.path.join(app.root_path, 'static', 'data', 'pangasinan_municipalities.geojson')
+        
+        if not os.path.exists(geojson_path):
+            # Try current directory
+            geojson_path = os.path.join(app.root_path, 'pangasinan_municipalities.geojson')
+        
+        if os.path.exists(geojson_path):
+            with open(geojson_path, 'r') as f:
+                data = json.load(f)
+            print(f"✅ Loaded GeoJSON with {len(data['features'])} municipalities from {geojson_path}")
+            return data
+        else:
+            print(f"❌ GeoJSON file not found at {geojson_path}")
+            # Return empty FeatureCollection if file not found
+            return {"type": "FeatureCollection", "features": []}
+    except Exception as e:
+        print(f"❌ Error loading GeoJSON: {e}")
+        return {"type": "FeatureCollection", "features": []}
+
+# Root route
+@app.route("/")
+def index():
+    return redirect(url_for('login'))
+
+# GOOGLE LOGIN ROUTE
+@app.route("/login/google")
+def login_google():
+    """Redirect to Google's OAuth page"""
+    try:
+        # Generate the redirect URI
+        redirect_uri = url_for('auth_google_callback', _external=True)
+        print(f"Redirect URI: {redirect_uri}")  # Debug
+        return google.authorize_redirect(redirect_uri)
+    except Exception as e:
+        print(f"Error in login_google: {e}")
+        flash("Google login is currently unavailable. Please try again later.", "error")
+        return redirect(url_for('login'))
+
+# GOOGLE CALLBACK ROUTE
+@app.route("/auth/google/callback")
+def auth_google_callback():
+    """Handle Google OAuth callback"""
+    try:
+        # Get authorization code from Google
+        token = google.authorize_access_token()
+        user_info = google.parse_id_token(token)
+        
+        # Extract user information
+        email = user_info.get('email')
+        google_id = user_info.get('sub')
+        name = user_info.get('name', '').split('@')[0]
+        
+        print(f"Google Login Success - Email: {email}, Google ID: {google_id}")
+        
+        if not email:
+            flash("Google login failed: No email received.", "error")
+            return redirect(url_for('userLogin'))
+        
+        conn = get_db_connection()
+        cur = conn.cursor()
+        
+        # Check if user already exists
+        cur.execute("SELECT id, auth_provider FROM users WHERE email = %s", (email,))
+        user = cur.fetchone()
+        
+        if user:
+            user_id, auth_provider = user
+            
+            # If user exists with local auth, show error
+            if auth_provider == 'local':
+                flash("This email is already registered with email/password. Please use email login.", "error")
+                cur.close()
+                conn.close()
+                return redirect(url_for('userLogin'))
+            
+            # Update Google ID if missing
+            cur.execute("UPDATE users SET provider_user_id = %s WHERE id = %s", 
+                       (google_id, user_id))
+            conn.commit()
+        else:
+            # Create new user with Google auth
+            cur.execute("""
+                INSERT INTO users (email, auth_provider, provider_user_id)
+                VALUES (%s, %s, %s)
+                RETURNING id
+            """, (email, 'google', google_id))
+            
+            user_id = cur.fetchone()[0]
+            conn.commit()
+        
+        cur.close()
+        conn.close()
+        
+        # Set session
+        session['user_id'] = user_id
+        session['email'] = email
+        session['auth_provider'] = 'google'
+        session['name'] = name
+        
+        print(f"User logged in - ID: {user_id}, Email: {email}")
+        
+        # Redirect to home
+        return redirect(url_for('lensHome'))
+        
+    except Exception as e:
+        print(f"Google OAuth error: {str(e)}")
+        flash("Google login failed. Please try again.", "error")
+        return redirect(url_for('userLogin'))
+
+# API ENDPOINT SA SUMMARY DATA SA HOMEPAGE
+@app.route("/lensHomeData")
+def lensHomeData():
+    year = request.args.get('year', '2025')
+
+    conn = get_db_connection()
+    cur = conn.cursor()
+
+    # Top Municipality
+    cur.execute("""
+        SELECT "Municipality", COUNT(*) AS total_cases
+        FROM crime_reports
+        WHERE "Year" = %s
+        GROUP BY "Municipality"
+        ORDER BY total_cases DESC
+        LIMIT 1
+    """, (year,))
+    municipality = cur.fetchone()
+    municipality_name = municipality[0] if municipality else "-"
+    municipality_cases = municipality[1] if municipality else 0
+
+    # Most Common Crime
+    cur.execute("""
+        SELECT "Crime_Type", COUNT(*) AS cases
+        FROM crime_reports
+        WHERE "Year" = %s
+        AND "Crime_Type" != 'Others'
+        GROUP BY "Crime_Type"
+        ORDER BY cases DESC
+        LIMIT 1;
+    """, (year,))
+    crime = cur.fetchone()
+    crime_type = crime[0] if crime else "-"
+    crime_cases = crime[1] if crime else 0
+
+    # Peak Month
+    cur.execute("""
+        SELECT "Month", COUNT(*) AS total_cases
+        FROM crime_reports
+        WHERE "Year" = %s
+        GROUP BY "Month"
+        ORDER BY total_cases DESC
+        LIMIT 1
+    """, (year,))
+    month = cur.fetchone()
+    month_name = month[0] if month else "-"
+    month_cases = month[1] if month else 0
+
+    # Total Cases
+    cur.execute("""
+        SELECT COUNT(*) 
+        FROM crime_reports
+        WHERE "Year" = %s
+    """, (year,))
+    total_cases = cur.fetchone()[0]
+
+    cur.close()
+    conn.close()
+
+    return jsonify({
+        "municipality": {
+            "name": municipality_name,
+            "cases": municipality_cases
+        },
+        "crime": {
+            "type": crime_type,
+            "cases": crime_cases
+        },
+        "peak_month": {
+            "name": month_name,
+            "cases": month_cases
+        },
+        "total_cases": total_cases
+    })
+
+# WELCOME PAGE BEFORE MAG-LOGIN OR REGISTER
+@app.route("/login")
+def login():
+    return render_template("login.html")
+
+# USER LOGIN
+@app.route("/userLogin", methods=['GET', 'POST'])
+def userLogin():
+    if request.method == 'POST':
+        email = request.form['email'].strip()
+        password = request.form['password'].strip()
+
+        conn = get_db_connection()
+        cur = conn.cursor()
+
+        # Fetch user by email
+        cur.execute("""
+            SELECT id, email, password_hash, auth_provider, municipality
+            FROM users
+            WHERE email = %s
+        """, (email,))
+
+        user = cur.fetchone()
+        cur.close()
+        conn.close()
+
+        if not user:
+            flash('Email not found. Please check your email.', 'email_error')
+            return render_template("userLogin.html")
+
+        user_id, user_email, user_password_hash, auth_provider, user_muni = user
+
+        # Check if user uses Google auth
+        if auth_provider == "google":
+            flash("This email is registered with Google Sign-In. Please use Google to log in.", "password_error")
+            return render_template("userLogin.html")
+
+        # Check password
+        if not check_password_hash(user_password_hash, password):
+            flash('Incorrect password. Please try again.', 'password_error')
+            return render_template("userLogin.html")
+
+        # Login successful
+        session['user_id'] = user_id
+        session['email'] = user_email
+        session['auth_provider'] = auth_provider
+
+        # ✅ Use the existing municipality from the DB as default
+        session['municipality'] = user_muni or "Default Municipality"
+        session['year'] = 2025
+
+        return redirect(url_for('lensHome'))
+
+    return render_template("userLogin.html")
+
+# REGISTER ACCOUNT
+@app.route("/userSignIn", methods=['GET', 'POST'])
+def userSignIn():
+    if request.method == 'POST':
+        email = request.form['email'].strip()
+        password = request.form['password'].strip()
+        
+        # --- EMAIL VALIDATION ---
+        if not re.match(EMAIL_REGEX, email):
+            flash("Please enter a valid email address.", "error")
+            return redirect(url_for('userSignIn'))
+
+        # Additional domain check
+        if '.' not in email.split('@')[-1]:
+            flash("Please enter a valid email address with a domain.", "error")
+            return redirect(url_for('userSignIn'))
+        
+        valid_tlds = ['com', 'org', 'net', 'gov', 'edu', 'ph']
+        domain_tld = email.split('.')[-1].lower()
+        if domain_tld not in valid_tlds:
+            flash("Email must end with a valid domain like .com, .org, .ph", "error")
+            return redirect(url_for('userSignIn'))
+
+        # --- PASSWORD VALIDATION ---
+        if len(password) < 8:
+            flash("Password must be at least 8 characters.", "error")
+            return redirect(url_for('userSignIn'))
+
+        hashed_password = generate_password_hash(password)
+
+        conn = get_db_connection()
+        cur = conn.cursor()
+
+        # Check if email already exists
+        cur.execute("SELECT id, auth_provider FROM users WHERE email = %s", (email,))
+        existing_user = cur.fetchone()
+        
+        if existing_user:
+            user_id, auth_provider = existing_user
+            if auth_provider == 'google':
+                flash("This email is already registered with Google. Please use Google Sign-In.", "error")
+            else:
+                flash("Email already registered. Try logging in.", "error")
+            cur.close()
+            conn.close()
+            return redirect(url_for('userSignIn'))
+
+        # Insert new user
+        cur.execute(
+            """
+            INSERT INTO users (email, password_hash, auth_provider)
+            VALUES (%s, %s, 'local')
+            RETURNING id
+            """,
+            (email, hashed_password)
+        )
+
+        user_id = cur.fetchone()[0]
+        conn.commit()
+        cur.close()
+        conn.close()
+        
+        # Automatic login
+        session['user_id'] = user_id
+        session['email'] = email
+        session['auth_provider'] = 'local'
+
+        return redirect(url_for('selectMuni'))
+
+    return render_template("userSignIn.html")
+
+# FORGOT PASSWORD
+@app.route('/forgot-password', methods=['POST'])
+def forgot_password():
+    """Handle forgot password request"""
+    try:
+        data = request.get_json()
+        email = data.get('email', '').strip()
+        
+        if not email:
+            return jsonify({"status": "error", "message": "Email is required"}), 400
+        
+        # Validate email format
+        if not re.match(r'^[^@]+@[^@]+\.[^@]+$', email):
+            return jsonify({"status": "error", "message": "Invalid email format"}), 400
+        
+        conn = get_db_connection()
+        cur = conn.cursor()
+        
+        # Check if user exists and is not Google auth
+        cur.execute("""
+            SELECT id, auth_provider 
+            FROM users 
+            WHERE email = %s
+        """, (email,))
+        
+        user = cur.fetchone()
+        cur.close()
+        conn.close()
+        
+        # For security, always return success even if email doesn't exist
+        if not user:
+            return jsonify({
+                "status": "success",
+                "message": "If this email exists in our system, a reset link will be sent."
+            })
+        
+        user_id, auth_provider = user
+        
+        # Check if user uses Google auth
+        if auth_provider == 'google':
+            return jsonify({
+                "status": "error",
+                "message": "This email uses Google Sign-In. Please use Google to log in."
+            })
+        
+        # Generate secure token (valid for 15 minutes)
+        token = serializer.dumps(email, salt='password-reset-salt')
+        
+        # Create reset link - Updated route name
+        reset_link = url_for('reset_password_page', token=token, _external=True)
+        
+        # Create email message
+        msg = Message(
+            subject="SafeLens - Password Reset Request",
+            recipients=[email],
+            sender=app.config['MAIL_DEFAULT_SENDER']
+        )
+        
+        # Email content
+        msg.body = f"""
+        Hello,
+        
+        You requested to reset your password for SafeLens.
+        
+        Click the link below to reset your password:
+        {reset_link}
+        
+        This link will expire in 15 minutes.
+        
+        If you didn't request this, please ignore this email.
+        
+        SafeLens Team
+        """
+        
+        msg.html = f"""
+        <html>
+        <body style="font-family: Arial, sans-serif; line-height: 1.6;">
+            <div style="max-width: 600px; margin: 0 auto; padding: 20px;">
+                <h2 style="color: #145da0;">Password Reset Request</h2>
+                <p>Hello,</p>
+                <p>You requested to reset your password for your SafeLens account.</p>
+                <p style="text-align: center; margin: 30px 0;">
+                    <a href="{reset_link}" 
+                       style="background: #145da0; color: white; 
+                              padding: 12px 24px; text-decoration: none; 
+                              border-radius: 5px; display: inline-block;">
+                        Reset Password
+                    </a>
+                </p>
+                <p>Or copy and paste this link in your browser:</p>
+                <p style="background: #f5f8fb; padding: 10px; border-radius: 5px; 
+                          word-break: break-all; font-family: monospace;">
+                    {reset_link}
+                </p>
+                <p><strong>This link will expire in 15 minutes.</strong></p>
+                <p>If you didn't request this password reset, please ignore this email.</p>
+                <hr style="border: none; border-top: 1px solid #eee; margin: 30px 0;">
+                <p style="font-size: 12px; color: #666;">
+                    © 2025 SafeLens, All Rights Reserved
+                </p>
+            </div>
+        </body>
+        </html>
+        """
+        
+        # Send email
+        try:
+            mail.send(msg)
+            print(f"Password reset email sent to {email}")
+            return jsonify({
+                "status": "success",
+                "message": "Password reset link has been sent to your email. Please check your inbox."
+            })
+        except Exception as mail_error:
+            print(f"Error sending email: {mail_error}")
+            # For development/testing, provide a direct link
+            return jsonify({
+                "status": "success",
+                "message": f"Password reset link: {reset_link}",
+                "debug_link": reset_link
+            })
+        
+    except Exception as e:
+        print(f"Error in forgot_password: {str(e)}")
+        return jsonify({
+            "status": "error",
+            "message": "Failed to process reset request. Please try again later."
+        }), 500
+
+# RESET PASSWORD PAGE (GET REQUEST)
+@app.route('/reset-password/<token>', methods=['GET'])
+def reset_password_page(token):
+    """Display the reset password form"""
+    try:
+        # Verify token (15 minute expiration)
+        email = serializer.loads(token, salt='password-reset-salt', max_age=900)
+        return render_template('reset_password.html', token=token)
+    except:
+        flash("The password reset link is invalid or has expired. Please request a new one.", "error")
+        return redirect(url_for('userLogin'))
+
+# RESET PASSWORD (POST REQUEST)
+@app.route('/reset-password/<token>', methods=['POST'])
+def reset_password(token):
+    """Handle password reset form submission"""
+    try:
+        # Verify token (15 minute expiration)
+        email = serializer.loads(token, salt='password-reset-salt', max_age=900)
+    except:
+        flash("The password reset link is invalid or has expired. Please request a new one.", "error")
+        return redirect(url_for('userLogin'))
+    
+    password = request.form.get('password', '').strip()
+    confirm_password = request.form.get('confirm_password', '').strip()
+    
+    # Validation
+    if not password or not confirm_password:
+        flash("Please fill in all fields.", "error")
+        return render_template('reset_password.html', token=token)
+    
+    if password != confirm_password:
+        flash("Passwords do not match. Please try again.", "error")
+        return render_template('reset_password.html', token=token)
+    
+    if len(password) < 8:
+        flash("Password must be at least 8 characters long.", "error")
+        return render_template('reset_password.html', token=token)
+    
+    # Update password in database
+    hashed_password = generate_password_hash(password)
+    
+    conn = get_db_connection()
+    cur = conn.cursor()
+    
+    try:
+        cur.execute("""
+            UPDATE users 
+            SET password_hash = %s 
+            WHERE email = %s AND auth_provider = 'local'
+        """, (hashed_password, email))
+        
+        conn.commit()
+        
+        if cur.rowcount > 0:
+            flash("Your password has been reset successfully! You can now log in.", "success")
+            return redirect(url_for('userLogin'))
+        else:
+            flash("Failed to reset password. User not found or uses Google login.", "error")
+            return render_template('reset_password.html', token=token)
+            
+    except Exception as e:
+        conn.rollback()
+        print(f"Database error in reset_password: {str(e)}")
+        flash("An error occurred. Please try again.", "error")
+        return render_template('reset_password.html', token=token)
+    finally:
+        cur.close()
+        conn.close()
+
+# WELCOME PAGE AFTER REGISTRATION
+@app.route("/firstWelcome")
+def firstWelcome():
+    return render_template("firstWelcome.html")
+
+# HOMEPAGE
+@app.route("/lensHome")
+def lensHome():
+    if 'user_id' not in session:
+        return redirect(url_for('userLogin'))
+    
+    year = request.args.get('year', '2025')
+
+    conn = get_db_connection()
+    cur = conn.cursor()
+
+    # Get user's municipality from session or database
+    municipality_name = session.get('municipality')
+    if not municipality_name:
+        cur.execute("SELECT municipality FROM users WHERE id = %s", (session['user_id'],))
+        result = cur.fetchone()
+        municipality_name = result[0] if result else "Default Town"
+        session['municipality'] = municipality_name
+
+    # Municipality with highest crime rate
+    cur.execute("""
+        SELECT "Municipality", COUNT(*) as total_cases
+        FROM crime_reports
+        WHERE "Year" = %s
+        GROUP BY "Municipality"
+        ORDER BY total_cases DESC
+        LIMIT 1
+    """, (year,))
+    municipality_data = cur.fetchone()
+
+    # Most common crime type
+    cur.execute("""
+        SELECT "Crime_Type", COUNT(*) as total_cases
+        FROM crime_reports
+        WHERE "Year" = %s
+        GROUP BY "Crime_Type"
+        ORDER BY total_cases DESC
+        LIMIT 1
+    """, (year,))
+    crime_data = cur.fetchone()
+
+    # Peak month (highest number of crimes)
+    cur.execute("""
+        SELECT "Month", COUNT(*) as total_cases
+        FROM crime_reports
+        WHERE "Year" = %s
+        GROUP BY "Month"
+        ORDER BY total_cases DESC
+        LIMIT 1
+    """, (year,))
+    month_data = cur.fetchone()
+    
+    # Total Crime Cases in that year
+    cur.execute("""
+        SELECT COUNT(*)
+        FROM crime_reports
+        WHERE "Year" = %s
+        """, (year,))
+    total_cases = cur.fetchone()[0]
+
+    cur.close()
+    conn.close()
+
+    month_name, month_cases = month_data if month_data else (None, 0)
+    
+    return render_template(
+        "lensHome.html",
+        year=year,
+        municipality_data=municipality_data,
+        crime_data=crime_data,
+        month_name=month_name,
+        month_cases=month_cases,
+        total_cases=total_cases,
+        active_page="home"
+    )
+
+@app.route("/secondWelcome")
+def secondWelcome():
+    return render_template("secondWelcome.html")
+
+@app.route("/thirdWelcome")
+def thirdWelcome():
+    return render_template("thirdWelcome.html")
+
+@app.route("/fourthWelcome")
+def fourthWelcome():
+    return render_template("fourthWelcome.html")
+
+@app.route("/fifthWelcome")
+def fifthWelcome():
+    return render_template("fifthWelcome.html")
+
+@app.route("/selectMuni")
+def selectMuni():
+    return render_template("selectMuni.html")
+
+@app.route("/lensHome2")
+def tryulit():
+    return render_template("lensHome2.html")
+
+# FULL ANALYTICS
+@app.route("/lensAnalytics")
+def analytics():
+    year = int(request.args.get("year", 2025))
+    
+    conn = get_db_connection()
+    cur = conn.cursor()
+
+    # YEARS FOR DROPDOWN
+    cur.execute("""
+        SELECT DISTINCT "Year"
+        FROM crime_reports
+        ORDER BY "Year" DESC
+    """)
+    years = [row[0] for row in cur.fetchall()]
+    
+    if not year or int(year) not in years:
+        year = years[0]
+        
+    # 🔹 Total cases per year (whole Pangasinan)
+    cur.execute("""
+        SELECT COUNT(*)
+        FROM crime_reports
+        WHERE "Year" = %s
+    """, (year,))
+    total_cases = cur.fetchone()[0]
+    
+    # 🔹 Monthly peak (highest crime month of the year)
+    cur.execute("""
+        SELECT "Month", COUNT(*) AS cases
+        FROM crime_reports
+        WHERE "Year" = %s
+        GROUP BY "Month"
+        ORDER BY cases DESC
+        LIMIT 1
+    """, (year,))
+
+    peak_row = cur.fetchone()
+    peak_month, peak_month_cases = peak_row if peak_row else ("-", 0)
+    
+    # Monthly trend for the whole Pangasinan
+    cur.execute("""
+        SELECT "Month", COUNT(*) AS cases
+        FROM crime_reports
+        WHERE "Year" = %s
+        GROUP BY "Month"
+        ORDER BY "Month" ASC
+    """, (year,))
+    trend_rows = cur.fetchall()
+
+    # Standard month order
+    months_order = ["January", "February", "March", "April", "May", "June",
+                    "July", "August", "September", "October", "November", "December"]
+
+    # Make a clean dictionary from query
+    month_dict = {}
+    for row in trend_rows:
+        month_name = row[0].strip().title()
+        month_cases = row[1]
+        month_dict[month_name] = month_cases
+
+    # Fill missing months with 0 and preserve order
+    months = []
+    cases = []
+    for m in months_order:
+        months.append(m)
+        cases.append(month_dict.get(m, 0))
+
+    # 🔹 Top 3 municipalities (for mini card)
+    cur.execute("""
+        SELECT "Municipality", COUNT(*) AS cases
+        FROM crime_reports
+        WHERE "Year" = %s
+        GROUP BY "Municipality"
+        ORDER BY cases DESC
+        LIMIT 3
+    """, (year,))
+    top3_munis = cur.fetchall()
+    top3_labels = [row[0] for row in top3_munis]
+    top3_values = [row[1] for row in top3_munis]
+    
+    # 🔹 All municipalities (View All)
+    cur.execute("""
+        SELECT "Municipality", COUNT(*) AS cases
+        FROM crime_reports
+        WHERE "Year" = %s
+        GROUP BY "Municipality"
+        ORDER BY cases DESC
+    """, (year,))
+    all_munis = cur.fetchall()
+    all_labels = [row[0] for row in all_munis]
+    all_values = [row[1] for row in all_munis]
+
+    # 🔹 Top Municipality overall (total cases, filtered by year)
+    cur.execute("""
+        SELECT "Municipality", COUNT(*) AS cases
+        FROM crime_reports
+        WHERE "Year" = %s
+        GROUP BY "Municipality"
+        ORDER BY cases DESC
+        LIMIT 1;
+    """, (year,))
+    top_muni_row = cur.fetchone()
+    top_municipality, top_municipality_cases = top_muni_row if top_muni_row else ("-", 0)
+
+    # 🔹 Most Common Crime Type overall (filtered by year)
+    cur.execute("""
+        SELECT "Crime_Type", COUNT(*) AS cases
+        FROM crime_reports
+        WHERE "Year" = %s
+        AND "Crime_Type" != 'Others'
+        GROUP BY "Crime_Type"
+        ORDER BY cases DESC
+        LIMIT 1;
+    """, (year,))
+    common_crime_row = cur.fetchone()
+    if common_crime_row:
+        common_crime, common_crime_cases = common_crime_row
+    else:
+        common_crime, common_crime_cases = "-", 0
+
+    # 🔹 Table: Top Municipality per Crime Type (exclude 'Others')
+    cur.execute("""
+        SELECT crime, municipality, cases FROM (
+            SELECT
+                "Crime_Type" AS crime,
+                "Municipality" AS municipality,
+                COUNT(*) AS cases,
+                ROW_NUMBER() OVER(PARTITION BY "Crime_Type" ORDER BY COUNT(*) DESC) AS rn
+            FROM crime_reports
+            WHERE "Year" = %s
+            AND "Crime_Type" != 'Others'
+            GROUP BY "Crime_Type", "Municipality"
+        ) t
+        WHERE rn = 1
+        ORDER BY
+            CASE crime
+                WHEN 'Robbery' THEN 1
+                WHEN 'Vandalism' THEN 2
+                WHEN 'Drugs' THEN 3
+                WHEN 'Rape' THEN 4
+                WHEN 'Abuse' THEN 5
+                WHEN 'Theft' THEN 6
+                WHEN 'Homicide' THEN 7
+                ELSE 8
+            END;
+    """, (year,))
+
+    table_data = [
+        {"crime": row[0], "municipality": row[1], "cases": row[2]}
+        for row in cur.fetchall()
+    ]
+
+    cur.close()
+    conn.close()
+
+    return render_template(
+        "lensAnalytics.html",
+        total_cases=total_cases,
+        years=years,
+        selected_year=int(year),
+        top_municipality=top_municipality,
+        top_municipality_cases=top_municipality_cases,
+        common_crime=common_crime,
+        table_data=table_data,
+        peak_month=peak_month,
+        peak_month_cases=peak_month_cases,
+        common_crime_cases=common_crime_cases,
+        trend_months=months,
+        trend_cases=cases,
+        municipality_names=top3_labels,
+        municipality_cases=top3_values,
+        all_municipality_names=all_labels,
+        all_municipality_cases=all_values,
+        active_page="analytics"
+    )
+    
+# for user
+@app.route("/allCrimeTrend")
+def allCrimeTrend():
+    year = request.args.get('year', 2025)
+    trend_months = get_all_months_for_year(year)
+    trend_cases = get_crime_cases_per_month(year)
+    analysis_text = generate_crime_trend_analysis(year)
+
+    return render_template("allCrimeTrend.html",
+                          year=year,
+                          trend_months=trend_months,
+                          trend_cases=trend_cases,
+                          analysis_text=analysis_text)
+    
+# for guest
+@app.route("/allCrimeTrendGuest")
+def allCrimeTrendGuest():
+    year = request.args.get('year', 2025)
+    trend_months = get_all_months_for_year(year)
+    trend_cases = get_crime_cases_per_month(year)
+    analysis_text = generate_crime_trend_analysis(year)
+
+    return render_template("allCrimeTrendGuest.html",
+                          year=year,
+                          trend_months=trend_months,
+                          trend_cases=trend_cases,
+                          analysis_text=analysis_text)
+
+# SAVE MUNICIPALITY, MAGAGAMIT SA DEFAULT CARD SA MAY MAP
+@app.route("/save_municipality", methods=["POST"])
+def save_municipality():
+    user_id = session.get('user_id')
+    if not user_id:
+        return jsonify({"success": False, "message": "User not logged in"}), 401
+
+    data = request.get_json()
+    municipality = data.get("municipality")
+
+    if not municipality:
+        return jsonify({"success": False, "message": "No municipality provided"}), 400
+
+    # Update sa database
+    conn = get_db_connection()
+    cur = conn.cursor()
+    cur.execute(
+        "UPDATE users SET municipality = %s WHERE id = %s",
+        (municipality, user_id)
+    )
+    conn.commit()
+    cur.close()
+    conn.close()
+    
+    # ✅ Store municipality sa session para magamit sa analytics
+    session['municipality'] = municipality
+
+    return jsonify({"success": True})
+
+# for user
+@app.route("/allMunicipalities")
+def allMunicipalities():
+    year = request.args.get("year", 2025)
+
+    conn = get_db_connection()
+    cur = conn.cursor()
+    cur.execute("""
+        SELECT "Municipality", COUNT(*) AS cases
+        FROM crime_reports
+        WHERE "Year" = %s
+        GROUP BY "Municipality"
+        ORDER BY cases DESC
+    """, (year,))
+    all_munis = cur.fetchall()
+    cur.close()
+    conn.close()
+
+    return render_template("allMunicipalities.html",
+                          municipalities=all_munis,
+                          year=year,
+                          active_page="analytics")
+    
+# for guest
+@app.route("/allMunicipalitiesGuest")
+def allMunicipalitiesGuest():
+    year = request.args.get("year", 2025)
+
+    conn = get_db_connection()
+    cur = conn.cursor()
+    cur.execute("""
+        SELECT "Municipality", COUNT(*) AS cases
+        FROM crime_reports
+        WHERE "Year" = %s
+        GROUP BY "Municipality"
+        ORDER BY cases DESC
+    """, (year,))
+    all_munis = cur.fetchall()
+    cur.close()
+    conn.close()
+
+    return render_template("allMunicipalitiesGuest.html",
+                          municipalities=all_munis,
+                          year=year,
+                          active_page="analytics")
+    
+@app.route('/searchMunicipality')
+def search_municipality():
+    name = request.args.get('name', '').strip()
+    year = request.args.get('year')
+
+    if not name:
+        return jsonify({"error": "No municipality provided"}), 400
+
+    try:
+        year = int(year) if year else 2025
+    except ValueError:
+        return jsonify({"error": "Invalid year"}), 400
+
+    conn = get_db_connection()
+    cur = conn.cursor()
+
+    # TOTAL CASES with case-insensitive search
+    cur.execute("""
+        SELECT COUNT(*), MIN("Municipality")
+        FROM crime_reports
+        WHERE "Municipality" ILIKE %s AND "Year" = %s
+    """, (name, year))
+    result = cur.fetchone()
+    total_cases = result[0]
+    proper_name = result[1]
+    
+    if total_cases == 0:
+        cur.close()
+        conn.close()
+        return jsonify({"error": "Municipality not found"})
+
+    # TOP CRIME
+    cur.execute("""
+        SELECT "Crime_Type", COUNT(*)
+        FROM crime_reports
+        WHERE "Municipality" = %s AND "Year" = %s
+        GROUP BY "Crime_Type"
+        ORDER BY COUNT(*) DESC
+        LIMIT 1
+    """, (name, year))
+    crime = cur.fetchone()
+
+    # PEAK MONTH
+    cur.execute("""
+        SELECT "Month", COUNT(*)
+        FROM crime_reports
+        WHERE "Municipality" = %s AND "Year" = %s
+        GROUP BY "Month"
+        ORDER BY COUNT(*) DESC
+        LIMIT 1
+    """, (name, year))
+    peak = cur.fetchone()
+
+    cur.close()
+    conn.close()
+
+    return jsonify({
+        "municipality": {
+            "name": proper_name,
+            "cases": total_cases
+        },
+        "crime": {
+            "type": crime[0] if crime else "-",
+            "cases": crime[1] if crime else 0
+        },
+        "peak_month": {
+            "name": peak[0] if peak else "-",
+            "cases": peak[1] if peak else 0
+        },
+        "year": year
+    })
+    
+@app.route('/editProfile')
+def editProfile():
+    return render_template('editProfile.html')
+
+@app.route('/security')
+def security():
+    return render_template('security.html')
+
+# change password
+@app.route('/change-password', methods=['POST'])
+def change_password():
+    user_id = session.get('user_id')
+    if not user_id:
+        flash("You must be logged in to change your password.", "error")
+        return redirect(url_for('login'))
+
+    # Get form values
+    current_password = request.form.get("current_password")
+    new_password = request.form.get("new_password")
+    confirm_password = request.form.get("confirm_password")
+
+    # Validation
+    if not current_password or not new_password or not confirm_password:
+        flash("All fields are required.", "error")
+        return redirect(url_for('security'))
+
+    if new_password != confirm_password:
+        flash("New password and confirmation do not match.", "error")
+        return redirect(url_for('security'))
+
+    if len(new_password) < 8:
+        flash("New password must be at least 8 characters.", "error")
+        return redirect(url_for('security'))
+
+    # Fetch current password hash
+    conn = get_db_connection()
+    cur = conn.cursor()
+    cur.execute("SELECT password_hash FROM users WHERE id = %s AND auth_provider = 'local'", (user_id,))
+    user = cur.fetchone()
+
+    if not user:
+        cur.close()
+        conn.close()
+        flash("Cannot change password for this account.", "error")
+        return redirect(url_for('security'))
+
+    password_hash = user[0]
+
+    if not check_password_hash(password_hash, current_password):
+        cur.close()
+        conn.close()
+        flash("Current password is incorrect.", "error")
+        return redirect(url_for('security'))
+
+    # Update password
+    new_hash = generate_password_hash(new_password)
+    cur.execute("UPDATE users SET password_hash = %s WHERE id = %s", (new_hash, user_id))
+    conn.commit()
+    cur.close()
+    conn.close()
+
+    flash("Password updated successfully!", "success")
+    return redirect(url_for('security'))
+
+# save all changes after mag-change password
+@app.route('/save-security', methods=['POST'])
+def save_security():
+    user_id = session.get('user_id')
+    if not user_id:
+        flash("You must be logged in.", "error")
+        return redirect(url_for('login'))
+    
+    flash('Saved Successfully!', 'success')
+    return redirect(url_for('lensHome'))
+
+@app.route('/helpsupport')
+def helpsupport():
+    return render_template('helpsupport.html')
+
+@app.route('/termsPolicies')
+def termsPolicies():
+    return render_template('termsPolicies.html')
+
+@app.route('/reportProblem')
+def reportProblem():
+    return render_template('reportProblem.html')
+
+@app.route('/logout')
+def logout():
+    # Clear all session data
+    session.clear()
+    
+    # Create response with no-cache headers
+    resp = make_response(redirect(url_for('login')))
+    resp.headers['Cache-Control'] = 'no-store, no-cache, must-revalidate, max-age=0'
+    resp.headers['Pragma'] = 'no-cache'
+    resp.headers['Expires'] = '0'
+    
+    return resp
+
+# FOR GUEST MODE HOMEPAGE
+@app.route("/guestHome")
+def guestHome():
+    year = request.args.get('year', '2025')
+
+    conn = get_db_connection()
+    cur = conn.cursor()
+
+    # Municipality with highest crime rate
+    cur.execute("""
+        SELECT "Municipality", COUNT(*) as total_cases
+        FROM crime_reports
+        WHERE "Year" = %s
+        GROUP BY "Municipality"
+        ORDER BY total_cases DESC
+        LIMIT 1
+    """, (year,))
+    municipality_data = cur.fetchone()
+
+    # Most common crime type
+    cur.execute("""
+        SELECT "Crime_Type", COUNT(*) as total_cases
+        FROM crime_reports
+        WHERE "Year" = %s
+        GROUP BY "Crime_Type"
+        ORDER BY total_cases DESC
+        LIMIT 1
+    """, (year,))
+    crime_data = cur.fetchone()
+
+    # Peak month (highest number of crimes)
+    cur.execute("""
+        SELECT "Month", COUNT(*) as total_cases
+        FROM crime_reports
+        WHERE "Year" = %s
+        GROUP BY "Month"
+        ORDER BY total_cases DESC
+        LIMIT 1
+    """, (year,))
+    month_data = cur.fetchone()
+    
+    # Total Crime Cases in that year
+    cur.execute("""
+        SELECT COUNT(*)
+        FROM crime_reports
+        WHERE "Year" = %s
+        """, (year,))
+    total_cases = cur.fetchone()[0]
+
+    cur.close()
+    conn.close()
+
+    month_name, month_cases = month_data if month_data else (None, 0)
+    
+    return render_template(
+        "guestHome.html",
+        year=year,
+        municipality_data=municipality_data,
+        crime_data=crime_data,
+        month_name=month_name,
+        month_cases=month_cases,
+        total_cases=total_cases,
+        active_page="home"
+    )
+    
+# USER MAP ROUTE
+@app.route("/userMap")
+def user_map():
+    user_id = session.get('user_id')
+    if not user_id:
+        return redirect('/login')
+
+    # 1️⃣ Municipality from session
+    municipality_name = session.get('municipality', 'Default Town')
+
+    # 2️⃣ Year from dropdown (default 2025)
+    year = int(request.args.get("year", 2025))
+
+    conn = get_db_connection()
+    cur = conn.cursor()
+
+    # 3️⃣ Total cases (COUNT rows)
+    cur.execute(
+        """
+        SELECT COUNT(*)
+        FROM crime_reports
+        WHERE "Municipality" = %s
+          AND "Year" = %s
+        """,
+        (municipality_name, year)
+    )
+    total_cases = cur.fetchone()[0] or 0
+
+    # 4️⃣ Top crime (most frequent Crime_Type)
+    cur.execute(
+        """
+        SELECT "Crime_Type", COUNT(*) AS cases
+        FROM crime_reports
+        WHERE "Municipality" = %s
+          AND "Year" = %s
+          AND "Crime_Type" != 'Others'
+        GROUP BY "Crime_Type"
+        ORDER BY cases DESC
+        LIMIT 1
+        """,
+        (municipality_name, year)
+    )
+    top_crime_data = cur.fetchone()
+    if top_crime_data:
+        top_crime = top_crime_data[0]
+        top_crime_cases = top_crime_data[1]
+    else:
+        top_crime = "-"
+        top_crime_cases = 0
+
+    # 5️⃣ Peak month (month with highest cases)
+    cur.execute(
+        """
+        SELECT "Month", COUNT(*) AS cases
+        FROM crime_reports
+        WHERE "Municipality" = %s
+          AND "Year" = %s
+        GROUP BY "Month"
+        ORDER BY cases DESC
+        LIMIT 1
+        """,
+        (municipality_name, year)
+    )
+    peak_month_data = cur.fetchone()
+    if peak_month_data:
+        peak_month = peak_month_data[0]
+        peak_month_cases = peak_month_data[1]
+    else:
+        peak_month = "-"
+        peak_month_cases = 0
+
+    # 6️⃣ Fetch available years for dropdown
+    cur.execute(
+        """
+        SELECT DISTINCT "Year"
+        FROM crime_reports
+        ORDER BY "Year" DESC
+        """
+    )
+    years = [row[0] for row in cur.fetchall()]
+
+    cur.close()
+    conn.close()
+    
+    if total_cases == 0:
+        light_color = "gray"
+    elif total_cases <= 10:
+        light_color = "green"
+    elif total_cases <= 30:
+        light_color = "yellow"
+    else:
+        light_color = "red"
+
+    return render_template(
+        "userMap.html",
+        municipality=municipality_name,
+        total_cases=total_cases,
+        top_crime=top_crime,
+        top_crime_cases=top_crime_cases,
+        peak_month=peak_month,
+        peak_month_cases=peak_month_cases,
+        year=year,
+        years=years,
+        active_page="userMap",
+        light_color=light_color
+    )
+    
+# search bar sa map
+@app.route("/municipality_suggestions")
+def municipality_suggestions():
+    term = request.args.get("term", "").strip()
+
+    if not term:
+        return jsonify([])
+
+    conn = get_db_connection()
+    cur = conn.cursor()
+    
+    cur.execute("""
+        SELECT DISTINCT "Municipality"
+        FROM crime_reports
+        WHERE "Municipality" ILIKE %s
+        ORDER BY "Municipality" ASC
+        LIMIT 10
+    """, (f"{term}%",))
+    
+    results = [row[0] for row in cur.fetchall()]
+    
+    cur.close()
+    conn.close()
+    
+    return jsonify(results)
+
+# mini card data sa left search bar
+@app.route("/userMap_data")
+def user_map_data():
+    municipality_name = request.args.get("municipality", session.get("municipality"))
+    year = int(request.args.get("year", session.get("year", 2025)))
+
+    session["municipality"] = municipality_name
+    session["year"] = year
+
+    conn = get_db_connection()
+    cur = conn.cursor()
+
+    # Total cases
+    cur.execute("""
+        SELECT COUNT(*)
+        FROM crime_reports
+        WHERE "Municipality" = %s AND "Year" = %s
+    """, (municipality_name, year))
+    total_cases = cur.fetchone()[0] or 0
+
+    # Top crime
+    cur.execute("""
+        SELECT "Crime_Type", COUNT(*) AS cases
+        FROM crime_reports
+        WHERE "Municipality" = %s AND "Year" = %s AND "Crime_Type" != 'Others'
+        GROUP BY "Crime_Type"
+        ORDER BY cases DESC
+        LIMIT 1
+    """, (municipality_name, year))
+    top_crime_data = cur.fetchone()
+    top_crime = top_crime_data[0] if top_crime_data else "-"
+    top_crime_cases = top_crime_data[1] if top_crime_data else 0
+
+    # Peak month
+    cur.execute("""
+        SELECT "Month", COUNT(*) AS cases
+        FROM crime_reports
+        WHERE "Municipality" = %s AND "Year" = %s
+        GROUP BY "Month"
+        ORDER BY cases DESC
+        LIMIT 1
+    """, (municipality_name, year))
+    peak_month_data = cur.fetchone()
+    peak_month = peak_month_data[0] if peak_month_data else "-"
+    peak_month_cases = peak_month_data[1] if peak_month_data else 0
+
+    cur.close()
+    conn.close()
+
+    # light color
+    if total_cases == 0:
+        light_color = "gray"
+    elif total_cases <= 10:
+        light_color = "green"
+    elif total_cases <= 30:
+        light_color = "yellow"
+    else:
+        light_color = "red"
+
+    return jsonify({
+        "municipality": municipality_name,
+        "year": year,
+        "total_cases": total_cases,
+        "top_crime": top_crime,
+        "top_crime_cases": top_crime_cases,
+        "peak_month": peak_month,
+        "peak_month_cases": peak_month_cases,
+        "light_color": light_color
+    })
+
+# NEW GEOJSON API ENDPOINTS
+@app.route('/api/map/geojson')
+def municipalities_geojson():
+    """Serve the GeoJSON data for all municipalities"""
+    data = load_geojson_data()
+    return jsonify(data)
+
+@app.route('/api/map/geojson/<int:year>')
+def map_geojson_with_data(year):
+    """Get GeoJSON with crime data for map visualization"""
+    conn = get_db_connection()
+    cur = conn.cursor()
+    
+    # Get crime counts per municipality for the year
+    cur.execute("""
+        SELECT "Municipality", COUNT(*) as crime_count
+        FROM crime_reports 
+        WHERE "Year" = %s 
+        GROUP BY "Municipality"
+    """, (year,))
+    
+    crime_counts = {row[0]: row[1] for row in cur.fetchall()}
+    
+    cur.close()
+    conn.close()
+    
+    # Load base GeoJSON
+    geojson_data = load_geojson_data()
+    
+    # Enhance GeoJSON with crime data
+    for feature in geojson_data['features']:
+        municipality = feature['properties'].get('MUNICIPALITY')
+        crime_count = crime_counts.get(municipality, 0)
+        
+        # Add crime data to properties
+        feature['properties']['crime_count'] = crime_count
+        
+        # Determine color based on crime count
+        if crime_count == 0:
+            color = '#cccccc'
+            level = 'low'
+        elif crime_count <= 10:
+            color = '#90ee90'
+            level = 'medium'
+        elif crime_count <= 30:
+            color = '#ffff00'
+            level = 'high'
+        else:
+            color = '#ff0000'
+            level = 'very_high'
+            
+        feature['properties']['fill_color'] = color
+        feature['properties']['crime_level'] = level
+    
+    return jsonify(geojson_data)
+
+@app.route('/api/map/municipality/<name>/<int:year>')
+def municipality_data(name, year):
+    """Get detailed crime data for a specific municipality"""
+    conn = get_db_connection()
+    cur = conn.cursor()
+    
+    # Total cases
+    cur.execute("""
+        SELECT COUNT(*) as total_cases
+        FROM crime_reports 
+        WHERE "Municipality" ILIKE %s AND "Year" = %s
+    """, (name, year))
+    total_cases = cur.fetchone()[0] or 0
+    
+    # Most common crime type
+    cur.execute("""
+        SELECT "Crime_Type", COUNT(*) as cases
+        FROM crime_reports 
+        WHERE "Municipality" ILIKE %s AND "Year" = %s AND "Crime_Type" != 'Others'
+        GROUP BY "Crime_Type"
+        ORDER BY cases DESC
+        LIMIT 1
+    """, (name, year))
+    crime_data = cur.fetchone()
+    
+    # Peak month
+    cur.execute("""
+        SELECT "Month", COUNT(*) as cases
+        FROM crime_reports 
+        WHERE "Municipality" ILIKE %s AND "Year" = %s
+        GROUP BY "Month"
+        ORDER BY cases DESC
+        LIMIT 1
+    """, (name, year))
+    month_data = cur.fetchone()
+    
+    cur.close()
+    conn.close()
+    
+    return jsonify({
+        'municipality': name,
+        'year': year,
+        'total_cases': total_cases,
+        'top_crime': crime_data[0] if crime_data else '-',
+        'top_crime_cases': crime_data[1] if crime_data else 0,
+        'peak_month': month_data[0] if month_data else '-',
+        'peak_month_cases': month_data[1] if month_data else 0
+    })
+
+# HEATMAP DATA ENDPOINT
+@app.route('/heatmap-data')
+def heatmap_data():
+    year = request.args.get('year', 2025)
+    
+    conn = get_db_connection()
+    cur = conn.cursor()
+    
+    # Query to get crime counts per municipality for the year
+    query = """
+        SELECT "Municipality", COUNT(*) as count
+        FROM crime_reports 
+        WHERE "Year" = %s 
+        GROUP BY "Municipality"
+        ORDER BY count DESC
+    """
+    
+    cur.execute(query, (year,))
+    results = cur.fetchall()
+    
+    cur.close()
+    conn.close()
+    
+    # Format as JSON
+    data = []
+    for row in results:
+        data.append({
+            "municipality": row[0],
+            "count": row[1]
+        })
+    
+    return jsonify(data)
+
+# HOTLINES PAGE ROUTE
+@app.route("/hotlines")
+def hotlines():
+    return render_template("hotlines.html")
+
+@app.route("/safetyTips")
+def safetyTips():
+    return render_template("safetyTips.html")
+
+@app.route("/travel")
+def travel():
+    return render_template("travel.html")
+
+@app.route("/online")
+def online():
+    return render_template("online.html")
+
+@app.route("/home")
+def home():
+    return render_template("home.html")
+
+@app.route("/personal")
+def personal():
+    return render_template("personal.html")
+
+@app.route("/references")
+def references():
+    return render_template("references.html")
+
+# GUEST MODE FOR ANALYTICS
+@app.route("/guestAnalytics")
+def guestAnalytics():
+    year = int(request.args.get("year", 2025))
+    
+    conn = get_db_connection()
+    cur = conn.cursor()
+
+    # YEARS FOR DROPDOWN
+    cur.execute("""
+        SELECT DISTINCT "Year"
+        FROM crime_reports
+        ORDER BY "Year" DESC
+    """)
+    years = [row[0] for row in cur.fetchall()]
+    
+    if not year or int(year) not in years:
+        year = years[0]
+        
+    # 🔹 Total cases per year (whole Pangasinan)
+    cur.execute("""
+        SELECT COUNT(*)
+        FROM crime_reports
+        WHERE "Year" = %s
+    """, (year,))
+    total_cases = cur.fetchone()[0]
+    
+    # 🔹 Monthly peak (highest crime month of the year)
+    cur.execute("""
+        SELECT "Month", COUNT(*) AS cases
+        FROM crime_reports
+        WHERE "Year" = %s
+        GROUP BY "Month"
+        ORDER BY cases DESC
+        LIMIT 1
+    """, (year,))
+
+    peak_row = cur.fetchone()
+    peak_month, peak_month_cases = peak_row if peak_row else ("-", 0)
+    
+    # Monthly trend for the whole Pangasinan
+    cur.execute("""
+        SELECT "Month", COUNT(*) AS cases
+        FROM crime_reports
+        WHERE "Year" = %s
+        GROUP BY "Month"
+        ORDER BY "Month" ASC
+    """, (year,))
+    trend_rows = cur.fetchall()
+
+    # Standard month order
+    months_order = ["January", "February", "March", "April", "May", "June",
+                    "July", "August", "September", "October", "November", "December"]
+
+    # Make a clean dictionary from query
+    month_dict = {}
+    for row in trend_rows:
+        month_name = row[0].strip().title()
+        month_cases = row[1]
+        month_dict[month_name] = month_cases
+
+    # Fill missing months with 0 and preserve order
+    months = []
+    cases = []
+    for m in months_order:
+        months.append(m)
+        cases.append(month_dict.get(m, 0))
+        
+    # 🔹 Top 3 municipalities (for mini card)
+    cur.execute("""
+        SELECT "Municipality", COUNT(*) AS cases
+        FROM crime_reports
+        WHERE "Year" = %s
+        GROUP BY "Municipality"
+        ORDER BY cases DESC
+        LIMIT 3
+    """, (year,))
+    top3_munis = cur.fetchall()
+    top3_labels = [row[0] for row in top3_munis]
+    top3_values = [row[1] for row in top3_munis]
+    
+    # 🔹 All municipalities (View All)
+    cur.execute("""
+        SELECT "Municipality", COUNT(*) AS cases
+        FROM crime_reports
+        WHERE "Year" = %s
+        GROUP BY "Municipality"
+        ORDER BY cases DESC
+    """, (year,))
+    all_munis = cur.fetchall()
+    all_labels = [row[0] for row in all_munis]
+    all_values = [row[1] for row in all_munis]
+
+    # 🔹 Top Municipality overall (total cases, filtered by year)
+    cur.execute("""
+        SELECT "Municipality", COUNT(*) AS cases
+        FROM crime_reports
+        WHERE "Year" = %s
+        GROUP BY "Municipality"
+        ORDER BY cases DESC
+        LIMIT 1;
+    """, (year,))
+    top_muni_row = cur.fetchone()
+    top_municipality, top_municipality_cases = top_muni_row if top_muni_row else ("-", 0)
+
+    # 🔹 Most Common Crime Type overall (filtered by year)
+    cur.execute("""
+        SELECT "Crime_Type", COUNT(*) AS cases
+        FROM crime_reports
+        WHERE "Year" = %s
+        AND "Crime_Type" != 'Others'
+        GROUP BY "Crime_Type"
+        ORDER BY cases DESC
+        LIMIT 1;
+    """, (year,))
+    common_crime_row = cur.fetchone()
+    if common_crime_row:
+        common_crime, common_crime_cases = common_crime_row
+    else:
+        common_crime, common_crime_cases = "-", 0
+
+    # 🔹 Table: Top Municipality per Crime Type (exclude 'Others')
+    cur.execute("""
+        SELECT crime, municipality, cases
+        FROM (
+            SELECT
+                "Crime_Type" AS crime,
+                "Municipality" AS municipality,
+                COUNT(*) AS cases,
+                ROW_NUMBER() OVER(
+                    PARTITION BY "Crime_Type"
+                    ORDER BY COUNT(*) DESC
+                ) AS rn
+            FROM crime_reports
+            WHERE "Year" = %s
+            AND "Crime_Type" != 'Others'
+            GROUP BY "Crime_Type", "Municipality"
+        ) t
+        WHERE rn = 1
+        ORDER BY
+            CASE crime
+                WHEN 'Robbery' THEN 1
+                WHEN 'Vandalism' THEN 2
+                WHEN 'Drugs' THEN 3
+                WHEN 'Rape' THEN 4
+                WHEN 'Abuse' THEN 5
+                WHEN 'Theft' THEN 6
+                WHEN 'Homicide' THEN 7
+                ELSE 8
+            END;
+    """, (year,))
+
+    table_data = [
+        {"crime": row[0], "municipality": row[1], "cases": row[2]}
+        for row in cur.fetchall()
+    ]
+
+    cur.close()
+    conn.close()
+
+    return render_template(
+        "guestAnalytics.html",
+        total_cases=total_cases,
+        years=years,
+        selected_year=int(year),
+        top_municipality=top_municipality,
+        top_municipality_cases=top_municipality_cases,
+        common_crime=common_crime,
+        table_data=table_data,
+        peak_month=peak_month,
+        peak_month_cases=peak_month_cases,
+        common_crime_cases=common_crime_cases,
+        trend_months=months,
+        trend_cases=cases,
+        municipality_names=top3_labels,
+        municipality_cases=top3_values,
+        all_municipality_names=all_labels,
+        all_municipality_cases=all_values,
+        active_page="analytics"
+    )
+
+@app.route("/guestMap")
+def guestMap():
+    # Set a default municipality for guest users (Dagupan is a valid municipality)
+    municipality_name = session.get('municipality', 'Dagupan')
+    
+    # Ensure it's a valid municipality name
+    if municipality_name == "Default Town":
+        municipality_name = "Dagupan"
+    
+    year = int(request.args.get("year", 2025))
+
+    conn = get_db_connection()
+    cur = conn.cursor()
+
+    # 3️⃣ Total cases (COUNT rows)
+    cur.execute(
+        """
+        SELECT COUNT(*)
+        FROM crime_reports
+        WHERE "Municipality" ILIKE %s
+          AND "Year" = %s
+        """,
+        (municipality_name, year)
+    )
+    total_cases = cur.fetchone()[0] or 0
+
+    # 4️⃣ Top crime (most frequent Crime_Type)
+    cur.execute(
+        """
+        SELECT "Crime_Type", COUNT(*) AS cases
+        FROM crime_reports
+        WHERE "Municipality" ILIKE %s
+          AND "Year" = %s
+          AND "Crime_Type" != 'Others'
+        GROUP BY "Crime_Type"
+        ORDER BY cases DESC
+        LIMIT 1
+        """,
+        (municipality_name, year)
+    )
+    top_crime_data = cur.fetchone()
+    if top_crime_data:
+        top_crime = top_crime_data[0]
+        top_crime_cases = top_crime_data[1]
+    else:
+        top_crime = "-"
+        top_crime_cases = 0
+
+    # 5️⃣ Peak month (month with highest cases)
+    cur.execute(
+        """
+        SELECT "Month", COUNT(*) AS cases
+        FROM crime_reports
+        WHERE "Municipality" ILIKE %s
+          AND "Year" = %s
+        GROUP BY "Month"
+        ORDER BY cases DESC
+        LIMIT 1
+        """,
+        (municipality_name, year)
+    )
+    peak_month_data = cur.fetchone()
+    if peak_month_data:
+        peak_month = peak_month_data[0]
+        peak_month_cases = peak_month_data[1]
+    else:
+        peak_month = "-"
+        peak_month_cases = 0
+
+    # 6️⃣ Fetch available years for dropdown
+    cur.execute(
+        """
+        SELECT DISTINCT "Year"
+        FROM crime_reports
+        ORDER BY "Year" DESC
+        """
+    )
+    years = [row[0] for row in cur.fetchall()]
+
+    cur.close()
+    conn.close()
+    
+    # Light color logic
+    if total_cases == 0:
+        light_color = "gray"
+    elif total_cases <= 10:
+        light_color = "green"
+    elif total_cases <= 30:
+        light_color = "yellow"
+    else:
+        light_color = "red"
+
+    return render_template(
+        "guestMap.html",
+        municipality=municipality_name,
+        total_cases=total_cases,
+        top_crime=top_crime,
+        top_crime_cases=top_crime_cases,
+        peak_month=peak_month,
+        peak_month_cases=peak_month_cases,
+        year=year,
+        years=years,
+        active_page="guestMap",
+        light_color=light_color
+    )
+
+
+if __name__ == "__main__":
+    app.run(debug=True, port=5000)
